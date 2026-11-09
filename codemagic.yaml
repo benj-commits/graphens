@@ -6,8 +6,10 @@ workflows:
       flutter: stable
     scripts:
       - name: Install dependencies
+        working_directory: 7877o
         script: flutter packages pub get
       - name: Build Flutter package
+        working_directory: 7877o
         script: flutter build apk --release
     artifacts:
-      - build/app/outputs/flutter-apk/*.apk
+      - "**/build/app/outputs/flutter-apk/*.apk"
