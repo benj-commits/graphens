@@ -3,7 +3,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'api.dart';
 import 'config.dart';
 import 'theme.dart';
-import 'screens/auth_screen.dart';
 import 'screens/customer_shell.dart';
 
 Future<void> main() async {
@@ -23,11 +22,47 @@ class GraphenApp extends StatelessWidget {
       );
 }
 
-class AuthGate extends StatelessWidget {
+class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
+
   @override
-  Widget build(BuildContext context) => StreamBuilder<AuthState>(
-        stream: db.auth.onAuthStateChange,
-        builder: (context, _) => db.auth.currentSession == null ? const AuthScreen() : const CustomerShell(),
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  bool _booting = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _ensureGuestSession();
+  }
+
+  Future<void> _ensureGuestSession() async {
+    if (db.auth.currentSession != null) {
+      if (mounted) setState(() => _booting = false);
+      return;
+    }
+
+    try {
+      await db.auth.signInAnonymously();
+    } catch (_) {
+      // If anonymous sign-in is unavailable, continue without forcing auth.
+    }
+
+    if (mounted) setState(() => _booting = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_booting) {
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(),
+        ),
       );
+    }
+
+    return const CustomerShell();
+  }
 }

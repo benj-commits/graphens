@@ -17,12 +17,13 @@ class _CustomerShellState extends State<CustomerShell> {
   int i = 0;
   @override
   Widget build(BuildContext context) {
+    final customerId = db.auth.currentUser?.id ?? 'guest-user';
     final pages = [
       const ShopScreen(),
       const ProjectsScreen(),
       const CartScreen(),
       const OrdersScreen(),
-      ChatView(customerId: db.auth.currentUser!.id, asAdmin: false),
+      ChatView(customerId: customerId, asAdmin: false),
     ];
     const titles = ['Shop', 'Our Projects', 'My Cart', 'My Orders', 'Chat with Graphen'];
     return Scaffold(

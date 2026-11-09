@@ -22,7 +22,7 @@ class _ChatViewState extends State<ChatView> {
     try {
       await db.from('messages').insert({
         'customer_id': widget.customerId,
-        'sender_id': db.auth.currentUser!.id,
+        'sender_id': db.auth.currentUser?.id ?? widget.customerId,
         'is_admin': widget.asAdmin,
         'body': t,
       });
