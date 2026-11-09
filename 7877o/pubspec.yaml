@@ -1,0 +1,17 @@
+name: graphen_bags
+description: Graphen Bags - customer app and admin portal (Flutter mobile + web)
+publish_to: none
+version: 1.0.0+1
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+dependencies:
+  flutter:
+    sdk: flutter
+  supabase_flutter: ^2.5.0
+  intl: ^0.19.0
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+flutter:
+  uses-material-design: true

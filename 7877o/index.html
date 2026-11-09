@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Graphen Bags Admin</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<section id="login" class="center">
+  <form id="loginForm" class="card login">
+    <h1>Graphen <span>BAGS</span></h1>
+    <p class="muted">Admin portal</p>
+    <input id="email" type="email" placeholder="Admin email" required>
+    <input id="pass" type="password" placeholder="Password" required>
+    <button class="btn" type="submit">Sign in</button>
+    <button type="button" class="link2" id="forgot">Forgot password?</button>
+    <p id="loginErr" class="err"></p>
+  </form>
+  <form id="mfaForm" class="card login" hidden>
+    <h1>Verify it's you</h1>
+    <p class="muted">Enter the 6-digit code from your authenticator app</p>
+    <input id="mfaCode" inputmode="numeric" maxlength="6" placeholder="123456" required>
+    <button class="btn" type="submit">Verify</button>
+    <p id="mfaErr" class="err"></p>
+  </form>
+  <form id="newPassForm" class="card login" hidden>
+    <h1>New password</h1>
+    <input id="np" type="password" minlength="10" placeholder="New password (10+ characters)" required>
+    <button class="btn" type="submit">Save password</button>
+    <p id="npErr" class="err"></p>
+  </form>
+</section>
+
+<section id="app" hidden>
+  <aside id="side">
+    <div class="brand">Graphen <span>BAGS</span><small>Admin</small></div>
+    <nav id="nav"></nav>
+    <button class="link" id="logout">Sign out</button>
+  </aside>
+  <main>
+    <header><h2 id="title"></h2><div id="actions"></div></header>
+    <div id="view"></div>
+  </main>
+</section>
+
+<dialog id="dlg"><form method="dialog" id="dlgForm"></form></dialog>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
