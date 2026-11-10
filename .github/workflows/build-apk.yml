@@ -1,0 +1,40 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "7877o/**"
+      - ".github/workflows/build-apk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install dependencies
+        working-directory: 7877o
+        run: flutter pub get
+
+      - name: Build release APK
+        working-directory: 7877o
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: graphens-android-apk
+          path: 7877o/build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
+          retention-days: 14
