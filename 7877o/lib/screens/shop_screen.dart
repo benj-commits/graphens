@@ -4,6 +4,7 @@ import '../theme.dart';
 
 class ShopScreen extends StatefulWidget {
   const ShopScreen({super.key});
+
   @override
   State<ShopScreen> createState() => _ShopScreenState();
 }
@@ -17,9 +18,18 @@ class _ShopScreenState extends State<ShopScreen> {
   Widget build(BuildContext context) => Column(children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-          child: TextField(
-            onChanged: (v) => setState(() => q = v.toLowerCase()),
-            decoration: const InputDecoration(hintText: 'Search bags, cases, wallets', prefixIcon: Icon(Icons.search), isDense: true),
+          child: Column(
+            children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Welcome back, ${myFirstName()}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                onChanged: (v) => setState(() => q = v.toLowerCase()),
+                decoration: const InputDecoration(hintText: 'Search bags, cases, wallets', prefixIcon: Icon(Icons.search), isDense: true),
+              ),
+            ],
           ),
         ),
         SizedBox(
@@ -57,6 +67,7 @@ class _ShopScreenState extends State<ShopScreen> {
 class _Card extends StatelessWidget {
   final Map<String, dynamic> p;
   const _Card(this.p);
+
   @override
   Widget build(BuildContext context) => InkWell(
         onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ProductDetail(p))),
@@ -77,15 +88,63 @@ class _Card extends StatelessWidget {
       );
 }
 
-class ProductDetail extends StatelessWidget {
+class ProductDetail extends StatefulWidget {
   final Map<String, dynamic> p;
   const ProductDetail(this.p, {super.key});
+
+  @override
+  State<ProductDetail> createState() => _ProductDetailState();
+}
+
+class _ProductDetailState extends State<ProductDetail> {
+  final comment = TextEditingController();
+  int rating = 5;
+  bool loading = false;
+  Set<String> wishlist = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadWishlist();
+  }
+
+  Future<void> _loadWishlist() async {
+    final ids = await WishlistStorage.load();
+    if (!mounted) return;
+    setState(() => wishlist = ids);
+  }
+
+  Future<void> _saveReview() async {
+    if (comment.text.trim().isEmpty) return;
+    setState(() => loading = true);
+    await ProductReviewStorage.submitReview(widget.p['id'], rating, comment.text.trim());
+    comment.clear();
+    if (!mounted) return;
+    setState(() => loading = false);
+    snack(context, 'Review submitted');
+  }
+
   @override
   Widget build(BuildContext context) {
+    final p = widget.p;
     final imgs = (p['images'] ?? []) as List;
     final out = (p['stock'] ?? 1) <= 0;
+    final productId = p['id'].toString();
+
     return Scaffold(
-      appBar: AppBar(title: Text(p['name'] ?? '')),
+      appBar: AppBar(
+        title: Text(p['name'] ?? ''),
+        actions: [
+          IconButton(
+            icon: Icon(wishlist.contains(productId) ? Icons.favorite : Icons.favorite_border),
+            onPressed: () async {
+              await WishlistStorage.toggle(productId);
+              await _loadWishlist();
+              snack(context, wishlist.contains(productId) ? 'Saved to wishlist' : 'Removed from wishlist');
+            },
+          ),
+        ],
+      ),
       body: ListView(children: [
         SizedBox(height: 340, child: imgs.isEmpty ? netImg(null) : PageView(children: imgs.map((u) => netImg(u as String)).toList())),
         Padding(
@@ -98,7 +157,16 @@ class ProductDetail extends StatelessWidget {
             Text(out ? 'Out of stock' : 'In stock', style: TextStyle(color: out ? Colors.red : Colors.green)),
             const SizedBox(height: 12),
             Text(p['description'] ?? ''),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
+            FutureBuilder<double>(
+              future: ProductReviewStorage.averageForProduct(productId),
+              builder: (context, snapshot) {
+                final avg = snapshot.data ?? 0;
+                final label = avg > 0 ? '${avg.toStringAsFixed(1)} / 5' : 'No ratings yet';
+                return Text('Average rating: $label', style: const TextStyle(fontWeight: FontWeight.w600));
+              },
+            ),
+            const SizedBox(height: 16),
             ElevatedButton.icon(
               onPressed: out ? null : () {
                 cart.add(p);
@@ -106,6 +174,35 @@ class ProductDetail extends StatelessWidget {
               },
               icon: const Icon(Icons.add_shopping_cart),
               label: const Text('Add to cart'),
+            ),
+            const SizedBox(height: 16),
+            const Divider(),
+            const Text('Reviews', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 12),
+            Row(children: [
+              DropdownButton<int>(value: rating, items: [5, 4, 3, 2, 1].map((i) => DropdownMenuItem(value: i, child: Text('$i ★'))).toList(), onChanged: (v) => setState(() => rating = v ?? 5)),
+              const SizedBox(width: 8),
+              Expanded(child: TextField(controller: comment, decoration: const InputDecoration(hintText: 'Write a review'))),
+              IconButton(onPressed: loading ? null : _saveReview, icon: const Icon(Icons.send, color: gold)),
+            ]),
+            const SizedBox(height: 12),
+            FutureBuilder<List<Map<String, dynamic>>>(
+              future: ProductReviewStorage.loadForProduct(productId),
+              builder: (context, snapshot) {
+                final reviews = snapshot.data ?? const [];
+                if (reviews.isEmpty) return const Text('No reviews yet. Be the first to review this item.');
+                return Column(
+                  children: reviews.map((review) {
+                    final r = ((review['rating'] as int?) ?? 0);
+                    return Card(
+                      child: ListTile(
+                        title: Text('${review['name'] ?? 'Customer'}  ${'★' * r}'),
+                        subtitle: Text(review['comment'] ?? ''),
+                      ),
+                    );
+                  }).toList(),
+                );
+              },
             ),
           ]),
         ),

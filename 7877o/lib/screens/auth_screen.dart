@@ -9,8 +9,7 @@ class AuthScreen extends StatefulWidget {
   State<AuthScreen> createState() => _AuthScreenState();
 }
 
-class _AuthScreenState extends State<AuthScreen>
-    with SingleTickerProviderStateMixin {
+class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final email = TextEditingController();
   final pass = TextEditingController();
@@ -50,19 +49,22 @@ class _AuthScreenState extends State<AuthScreen>
         final response = await db.auth.signUp(
           email: email.text.trim(),
           password: pass.text,
-          data: {
-            'full_name': name.text.trim(),
-            'phone': phone.text.trim(),
-          },
+          data: {'full_name': name.text.trim(), 'phone': phone.text.trim()},
         );
         if (response.session == null && mounted) {
           setState(() => message = 'Account created. Check your email to confirm, then sign in.');
         }
       } else {
-        await db.auth.signInWithPassword(
+        final result = await db.auth.signInWithPassword(
           email: email.text.trim(),
           password: pass.text,
         );
+        if (result.user != null) {
+          final authenticated = await tryBiometricAuth();
+          if (!authenticated && mounted) {
+            setState(() => message = 'Biometric sign-in is optional. You can continue with password sign-in.');
+          }
+        }
       }
     } catch (e) {
       if (mounted) setState(() => error = e.toString().replaceFirst('Exception: ', ''));
@@ -77,18 +79,9 @@ class _AuthScreenState extends State<AuthScreen>
         filled: true,
         fillColor: const Color(0xFFFFFDF9),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 17),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(15),
-          borderSide: const BorderSide(color: Color(0xFFE9E0D3)),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(15),
-          borderSide: const BorderSide(color: Color(0xFFE9E0D3)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(15),
-          borderSide: const BorderSide(color: gold, width: 1.5),
-        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: const BorderSide(color: Color(0xFFE9E0D3))),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: const BorderSide(color: Color(0xFFE9E0D3))),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: const BorderSide(color: gold, width: 1.5)),
       );
 
   @override
@@ -100,24 +93,12 @@ class _AuthScreenState extends State<AuthScreen>
           const Positioned.fill(
             child: DecoratedBox(
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFFF2E5D2), Color(0xFFFBF6EE), Color(0xFFEDE2D2)],
-                ),
+                gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFFF2E5D2), Color(0xFFFBF6EE), Color(0xFFEDE2D2)]),
               ),
             ),
           ),
-          Positioned(
-            top: -100,
-            right: -80,
-            child: _glow(250, const Color(0x35B8893A)),
-          ),
-          Positioned(
-            bottom: -125,
-            left: -100,
-            child: _glow(300, const Color(0x20B8893A)),
-          ),
+          Positioned(top: -100, right: -80, child: _glow(250, const Color(0x35B8893A))),
+          Positioned(bottom: -125, left: -100, child: _glow(300, const Color(0x20B8893A))),
           SafeArea(
             child: Center(
               child: SingleChildScrollView(
@@ -125,10 +106,7 @@ class _AuthScreenState extends State<AuthScreen>
                 child: FadeTransition(
                   opacity: CurvedAnimation(parent: _entrance, curve: Curves.easeOut),
                   child: SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(0, .08),
-                      end: Offset.zero,
-                    ).animate(CurvedAnimation(parent: _entrance, curve: Curves.easeOutCubic)),
+                    position: Tween<Offset>(begin: const Offset(0, .08), end: Offset.zero).animate(CurvedAnimation(parent: _entrance, curve: Curves.easeOutCubic)),
                     child: ConstrainedBox(
                       constraints: BoxConstraints(maxWidth: isWide ? 900 : 460),
                       child: Container(
@@ -136,21 +114,10 @@ class _AuthScreenState extends State<AuthScreen>
                           color: Colors.white.withValues(alpha: .93),
                           borderRadius: BorderRadius.circular(28),
                           border: Border.all(color: const Color(0xFFE9DDC8)),
-                          boxShadow: [
-                            BoxShadow(
-                              color: ink.withValues(alpha: .10),
-                              blurRadius: 40,
-                              offset: const Offset(0, 20),
-                            ),
-                          ],
+                          boxShadow: [BoxShadow(color: ink.withValues(alpha: .10), blurRadius: 40, offset: const Offset(0, 20))],
                         ),
                         clipBehavior: Clip.antiAlias,
-                        child: isWide
-                            ? Row(children: [
-                                Expanded(flex: 5, child: _brandPanel()),
-                                Expanded(flex: 6, child: _formPanel()),
-                              ])
-                            : _formPanel(),
+                        child: isWide ? Row(children: [Expanded(flex: 5, child: _brandPanel()), Expanded(flex: 6, child: _formPanel())]) : _formPanel(),
                       ),
                     ),
                   ),
@@ -164,22 +131,14 @@ class _AuthScreenState extends State<AuthScreen>
   }
 
   Widget _glow(double size, Color color) => IgnorePointer(
-        child: Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(shape: BoxShape.circle, color: color),
-        ),
+        child: Container(width: size, height: size, decoration: BoxDecoration(shape: BoxShape.circle, color: color)),
       );
 
   Widget _brandPanel() => Container(
         height: 610,
         padding: const EdgeInsets.all(38),
         decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF171512), Color(0xFF393024)],
-          ),
+          gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF171512), Color(0xFF393024)]),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -230,7 +189,7 @@ class _AuthScreenState extends State<AuthScreen>
               ),
               const SizedBox(height: 24),
               AnimatedSize(duration: const Duration(milliseconds: 250), curve: Curves.easeInOut, child: signUp ? Column(children: [
-                TextFormField(controller: name, textCapitalization: TextCapitalization.words, decoration: _decoration('Full name', Icons.person_outline), validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter your name' : null),
+                TextFormField(controller: name, textCapitalization: TextCapitalization.words, decoration: _decoration('Full name', Icons.person_outline), validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter your full name' : null),
                 const SizedBox(height: 13),
                 TextFormField(controller: phone, keyboardType: TextInputType.phone, decoration: _decoration('Phone / WhatsApp', Icons.phone_outlined), validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter your phone number' : null),
                 const SizedBox(height: 13),
@@ -295,10 +254,7 @@ class _AuthScreenState extends State<AuthScreen>
 
   Widget _notice(String text, {bool isError = false}) => Container(
         padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: isError ? const Color(0xFFFFF0ED) : const Color(0xFFF0F7ED),
-          borderRadius: BorderRadius.circular(12),
-        ),
+        decoration: BoxDecoration(color: isError ? const Color(0xFFFFF0ED) : const Color(0xFFF0F7ED), borderRadius: BorderRadius.circular(12)),
         child: Text(text, style: TextStyle(color: isError ? const Color(0xFF9B3025) : const Color(0xFF356B36), fontSize: 13)),
       );
 }
