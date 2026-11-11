@@ -48,7 +48,13 @@ class CartScreen extends StatelessWidget {
     final phone = TextEditingController(text: db.auth.currentUser?.userMetadata?['phone']?.toString() ?? '');
     final address = TextEditingController();
     final note = TextEditingController();
-    String pay = 'Mobile Money on delivery';
+    final voucher = TextEditingController();
+    String pay = 'MTN Request to Pay';
+    String deliverySlot = deliverySlots.first;
+    bool useLocation = false;
+    bool locationNoticeShown = false;
+    bool orderPlaced = false;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -57,16 +63,55 @@ class CartScreen extends StatelessWidget {
           padding: EdgeInsets.fromLTRB(16, 16, 16, MediaQuery.of(ctx).viewInsets.bottom + 16),
           child: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Text('Checkout', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 12),
               TextField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Phone for delivery')),
               const SizedBox(height: 10),
               TextField(controller: address, decoration: const InputDecoration(labelText: 'Delivery address / area')),
               const SizedBox(height: 10),
-              TextField(controller: note, decoration: const InputDecoration(labelText: 'Note (optional)')),
+              TextField(controller: note, decoration: const InputDecoration(labelText: 'Order note (optional)')),
+              const SizedBox(height: 10),
+              TextField(controller: voucher, decoration: const InputDecoration(labelText: 'Voucher code (optional)')),
               const SizedBox(height: 10),
               DropdownButtonFormField<String>(
-                initialValue: pay,
-                items: const ['Mobile Money on delivery', 'Cash on delivery', 'Pay at pickup'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-                onChanged: (v) => set(() => pay = v!),
+                value: pay,
+                items: const ['MTN Request to Pay', 'Airtel Request to Pay', 'Cash on delivery'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                onChanged: (v) => set(() => pay = v ?? pay),
+              ),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<String>(
+                value: deliverySlot,
+                items: deliverySlots.map((slot) => DropdownMenuItem(value: slot, child: Text(slot))).toList(),
+                onChanged: (v) => set(() => deliverySlot = v ?? deliverySlot),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Checkbox(value: useLocation, onChanged: (v) async {
+                    set(() => useLocation = v ?? false);
+                    if (v == true && !locationNoticeShown) {
+                      locationNoticeShown = true;
+                      if (ctx.mounted) {
+                        await requestLocationIfNeeded(context: ctx, showNotice: true);
+                      }
+                    }
+                  }),
+                  const Expanded(child: Text('Share my delivery location')),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(12)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Suggested transport', style: TextStyle(fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 6),
+                    Text('Best option: ${(cart.total.toDouble() < 200000 ? 'Faras' : 'Uber')} • ${ugx((cart.total.toDouble() * 0.08).round())}'),
+                  ],
+                ),
               ),
               const SizedBox(height: 14),
               ElevatedButton(
@@ -76,6 +121,10 @@ class CartScreen extends StatelessWidget {
                     return;
                   }
                   try {
+                    final discount = voucher.text.trim().toUpperCase() == 'GRAPHEN10' ? 0.1 : 0.0;
+                    final discounted = cart.total * (1 - discount);
+                    final orderId = (DateTime.now().millisecondsSinceEpoch % 100000).toString().padLeft(5, '0');
+
                     await db.from('orders').insert({
                       'user_id': db.auth.currentUser!.id,
                       'customer_name': myName(),
@@ -83,14 +132,27 @@ class CartScreen extends StatelessWidget {
                       'address': address.text.trim(),
                       'note': note.text.trim(),
                       'payment_method': pay,
-                      'total': cart.total,
+                      'total': discounted,
+                      'status': 'confirmed',
                       'items': cart.lines.values
                           .map((l) => {'id': l['p']['id'], 'name': l['p']['name'], 'price': l['p']['price'], 'qty': l['qty']})
                           .toList(),
                     });
                     cart.clear();
+                    orderPlaced = true;
                     if (ctx.mounted) Navigator.pop(ctx);
-                    if (context.mounted) snack(context, 'Order placed! We will contact you shortly.');
+                    if (context.mounted) {
+                      showDialog(
+                        context: context,
+                        builder: (_) => AlertDialog(
+                          title: const Text('Order confirmed', style: TextStyle(color: Colors.green)),
+                          content: Text('Your order #${orderId} is confirmed.\nDelivery slot: $deliverySlot\nPayment: $pay'),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
+                          ],
+                        ),
+                      );
+                    }
                   } catch (e) {
                     if (ctx.mounted) snack(ctx, e.toString());
                   }
