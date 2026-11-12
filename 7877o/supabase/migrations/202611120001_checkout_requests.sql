@@ -6,7 +6,18 @@ begin;
 alter table public.orders
   add column if not exists preferred_delivery_date date,
   add column if not exists checkout_request_id uuid,
-  add column if not exists checkout_request_hash text;
+  add column if not exists checkout_request_hash text,
+  add column if not exists delivery_latitude numeric,
+  add column if not exists delivery_longitude numeric,
+  -- Enforced on direct inserts too; never round a customer's selected pin.
+  add constraint orders_delivery_location_valid check (
+    (delivery_latitude is null and delivery_longitude is null)
+    or (delivery_latitude is not null and delivery_longitude is not null
+        and delivery_latitude between -90 and 90
+        and delivery_longitude between -180 and 180
+        and delivery_latitude = trunc(delivery_latitude, 8)
+        and delivery_longitude = trunc(delivery_longitude, 8))
+  );
 create unique index if not exists orders_user_checkout_request_unique
   on public.orders (user_id, checkout_request_id)
   where checkout_request_id is not null;
@@ -27,9 +38,12 @@ end $$;
 -- SECURITY INVOKER deliberately preserves existing orders INSERT/SELECT RLS.
 -- Advisory lock + request key lets the same customer safely retry after a lost
 -- response. A changed payload cannot silently resolve to a different order.
+-- Remove the old overload so six-argument calls resolve to the defaults below.
+drop function if exists public.place_checkout_order_v1(uuid, text, text, text, date, jsonb);
 create or replace function public.place_checkout_order_v1(
   p_request_id uuid, p_phone text, p_address text, p_note text,
-  p_preferred_date date, p_items jsonb
+  p_preferred_date date, p_items jsonb,
+  p_latitude numeric default null, p_longitude numeric default null
 ) returns jsonb
 language plpgsql security invoker set search_path = public, pg_temp as $$
 declare
@@ -48,13 +62,21 @@ begin
   if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then
     raise exception 'Your cart is empty';
   end if;
+  if (p_latitude is null) <> (p_longitude is null)
+     or (p_latitude is not null and (
+       not (p_latitude between -90 and 90 and p_longitude between -180 and 180)
+       or p_latitude <> trunc(p_latitude, 8) or p_longitude <> trunc(p_longitude, 8)
+     )) then
+    raise exception 'Delivery coordinates must be a valid pair with at most 8 decimal places';
+  end if;
   if not exists (select 1 from pg_class where oid = 'public.orders'::regclass and relrowsecurity)
      or not exists (select 1 from pg_trigger where tgrelid = 'public.orders'::regclass
                     and tgname = 'orders_secure' and not tgisinternal and tgenabled in ('O', 'A')) then
     raise exception 'Checkout is unavailable: order safeguards are not active';
   end if;
   v_hash := md5(jsonb_build_object('phone', btrim(p_phone), 'address', btrim(p_address),
-    'note', coalesce(btrim(p_note), ''), 'date', p_preferred_date, 'items', p_items)::text);
+    'note', coalesce(btrim(p_note), ''), 'date', p_preferred_date, 'items', p_items,
+    'latitude', trim_scale(p_latitude), 'longitude', trim_scale(p_longitude))::text);
   perform pg_advisory_xact_lock(hashtextextended(v_user::text || ':' || p_request_id::text, 0));
   select * into v_order from public.orders where user_id = v_user and checkout_request_id = p_request_id;
   if found then
@@ -65,13 +87,14 @@ begin
                               'preferred_delivery_date', v_order.preferred_delivery_date);
   end if;
   insert into public.orders (user_id, customer_name, phone, address, note, payment_method, items, total, status,
-                             preferred_delivery_date, checkout_request_id, checkout_request_hash)
+                             preferred_delivery_date, checkout_request_id, checkout_request_hash,
+                             delivery_latitude, delivery_longitude)
   values (v_user, coalesce(nullif(auth.jwt()->'user_metadata'->>'full_name', ''), 'Customer'), btrim(p_phone), btrim(p_address), coalesce(btrim(p_note), ''), 'Cash on delivery',
-          p_items, 0, 'pending', p_preferred_date, p_request_id, v_hash)
+          p_items, 0, 'pending', p_preferred_date, p_request_id, v_hash, p_latitude, p_longitude)
   returning * into v_order;
   return jsonb_build_object('id', v_order.id, 'status', v_order.status, 'total', v_order.total,
                             'preferred_delivery_date', v_order.preferred_delivery_date);
 end $$;
-revoke all on function public.place_checkout_order_v1(uuid, text, text, text, date, jsonb) from public, anon;
-grant execute on function public.place_checkout_order_v1(uuid, text, text, text, date, jsonb) to authenticated;
+revoke all on function public.place_checkout_order_v1(uuid, text, text, text, date, jsonb, numeric, numeric) from public, anon;
+grant execute on function public.place_checkout_order_v1(uuid, text, text, text, date, jsonb, numeric, numeric) to authenticated;
 commit;
