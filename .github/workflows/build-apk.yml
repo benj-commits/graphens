@@ -1,11 +1,9 @@
-name: Build Android APK
+name: Flutter Android Build
 
 on:
   push:
-    branches: ["main"]
-    paths:
-      - "7877o/**"
-      - ".github/workflows/build-apk.yml"
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -14,18 +12,36 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true
+          cache-path: 7877o/.pub-cache
+          pubspec-path: 7877o/pubspec.yaml
 
       - name: Install dependencies
         working-directory: 7877o
         run: flutter pub get
+
+      - name: Analyze
+        working-directory: 7877o
+        run: flutter analyze
+
+      - name: Run tests
+        working-directory: 7877o
+        run: flutter test
 
       - name: Build release APK
         working-directory: 7877o
@@ -34,7 +50,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: graphens-android-apk
+          name: graphen-bags-android-apk
           path: 7877o/build/app/outputs/flutter-apk/*.apk
-          if-no-files-found: error
-          retention-days: 14
