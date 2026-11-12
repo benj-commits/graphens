@@ -1,3 +1,10 @@
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE);
+const $ = s => document.querySelector(s);
+const ugx = n => 'UGX ' + Number(n || 0).toLocaleString();
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const STATUSES = ['pending', 'confirmed', 'processing', 'delivered', 'cancelled'];
+const CATS = ['Lady Bags', 'Handbags', 'Cases', 'Wallets & More', 'Other'];
+
 const CRUD = {
   products: { title: 'Products', one: 'product', name: 'name', price: 'price', fields: [
     ['name', 'Name', 'text'], ['category', 'Category', 'select', CATS], ['price', 'Price (UGX)', 'number'],
@@ -8,61 +15,142 @@ const CRUD = {
   vouchers: { title: 'Vouchers', one: 'voucher', name: 'code', price: 'value', fields: [
     ['code', 'Code', 'text'], ['value', 'Voucher value (UGX)', 'number'], ['expiry_date', 'Expiry date', 'date'], ['usage_limit', 'Usage limit', 'number'], ['active', 'Active', 'bool']] },
 };
+const PAGES = ['dashboard', 'products', 'projects', 'orders', 'deliveryFees', 'vouchers', 'messages', 'customers', 'feedback', 'activity', 'settings'];
+const LABEL = { dashboard: 'Dashboard', products: 'Products', projects: 'Projects', orders: 'Orders', deliveryFees: 'Delivery fees', vouchers: 'Vouchers', messages: 'Messages', customers: 'Customers', feedback: 'Feedback', activity: 'Activity', settings: 'Settings' };
 
-async function settings(v) {
-  const { data: f } = await sb.auth.mfa.listFactors();
-  const on = f.totp.length > 0;
-  const { data: loc } = await sb.from('profiles').select('phone, full_name').limit(1).maybeSingle();
-  v.innerHTML = `<div class="list" style="max-width:560px">
-    <div class="card"><b>Business location</b>
-      <div style="display:grid;gap:8px;margin-top:8px">
-        <input id="bizAddress" placeholder="Business address" value="${esc(loc?.address ?? '')}">
-        <input id="bizCoords" placeholder="Latitude, Longitude" value="${esc(loc?.coordinates ?? '')}">
-        <button class="btn" id="saveBiz">Save business location</button>
-      </div>
-    </div>
-    <div class="card"><b>Two-factor authentication</b>
-      <p class="small">${on ? 'On. A code from your authenticator app is needed at every sign-in.' : 'Off. Turn it on so a stolen password is not enough to get in.'}</p>
-      <div id="mfaBox">${on ? '<button class="btn ghost" id="mfaOff">Turn off</button>' : '<button class="btn gold" id="mfaOn">Set up with an authenticator app</button>'}</div></div>
-    <div class="card"><b>Change password</b>
-      <div style="display:grid;gap:8px;margin-top:8px"><input id="pw1" type="password" placeholder="New password (10+ characters)"><button class="btn" id="pwSave">Update password</button><p id="pwMsg" class="small"></p></div>
-    </div>
-  </div>`;
+let recovering = location.hash.includes('type=recovery');
+let me = null, page = 'dashboard', chatWith = null, pendingOrders = 0, idleTimer, authEpoch = 0, liveChannel = null;
 
-  $('#saveBiz').onclick = async () => {
-    const address = $('#bizAddress').value.trim();
-    const coords = $('#bizCoords').value.trim();
-    await sb.from('profiles').update({ address, coordinates: coords }).eq('id', me.id);
-    alert('Business location saved.');
-  };
+/* ---------- auth ---------- */
+const FORMS = ['loginForm', 'mfaForm', 'newPassForm'];
+const showForm = id => FORMS.forEach(f => $('#' + f).hidden = f !== id);
 
-  $('#pwSave').onclick = async () => {
-    const pw = $('#pw1').value;
-    if (pw.length < 10) { $('#pwMsg').textContent = 'Use at least 10 characters.'; return; }
-    const { error } = await sb.auth.updateUser({ password: pw });
-    $('#pwMsg').textContent = error ? error.message : 'Password updated.';
-    if (!error) $('#pw1').value = '';
-  };
+sb.auth.onAuthStateChange(ev => {
+  if (ev === 'PASSWORD_RECOVERY') { recovering = true; $('#app').hidden = true; $('#login').hidden = false; showForm('newPassForm'); }
+  if (ev === 'SIGNED_OUT') { authEpoch++; me = null; if (liveChannel) { sb.removeChannel(liveChannel); liveChannel = null; } clearTimeout(idleTimer); $('#app').hidden = true; $('#login').hidden = false; showForm('loginForm'); }
+});
 
-  if (on) $('#mfaOff').onclick = async () => {
-    if (!confirm('Turn off two-factor authentication?')) return;
-    const { error } = await sb.auth.mfa.unenroll({ factorId: f.totp[0].id });
-    if (error) alert(error.message); else { await sb.auth.refreshSession(); settings(v); }
-  };
-  else $('#mfaOn').onclick = async () => {
-    const { data: all } = await sb.auth.mfa.listFactors();
-    for (const x of (all.all || []).filter(x => x.status === 'unverified')) await sb.auth.mfa.unenroll({ factorId: x.id });
-    const { data, error } = await sb.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'Graphen admin ' + Date.now() });
-    if (error) { alert(error.message); return; }
-    $('#mfaBox').innerHTML = `<p class="small">Scan with Google Authenticator, Microsoft Authenticator or Authy.</p>
-      <img src="${data.totp.qr_code}" width="180" alt="QR code">
-      <p class="small">Or type this key: <code>${esc(data.totp.secret)}</code></p>
-      <input id="mfaVer" inputmode="numeric" maxlength="6" placeholder="6-digit code">
-      <button class="btn" id="mfaGo" style="margin-top:8px">Turn on</button><p class="err" id="mfaE"></p>`;
-    $('#mfaGo').onclick = async () => {
-      const { error } = await sb.auth.mfa.challengeAndVerify({ factorId: data.id, code: $('#mfaVer').value.trim() });
-      if (error) $('#mfaE').textContent = 'Wrong code. Try again.';
-      else { await sb.auth.refreshSession(); settings(v); }
-    };
-  };
+$('#loginForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  $('#loginErr').textContent = '';
+  const { error } = await sb.auth.signInWithPassword({ email: $('#email').value.trim(), password: $('#pass').value });
+  if (error) $('#loginErr').textContent = 'Wrong email or password.';
+  else boot();
+});
+
+$('#forgot').onclick = async () => {
+  const email = $('#email').value.trim();
+  if (!email) { $('#loginErr').textContent = 'Enter your email first.'; return; }
+  await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+  $('#loginErr').textContent = 'If that email belongs to an admin, a reset link is on its way.';
+};
+
+$('#newPassForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const { error } = await sb.auth.updateUser({ password: $('#np').value });
+  if (error) $('#npErr').textContent = error.message;
+  else { await sb.auth.signOut(); location.href = location.pathname; }
+});
+
+$('#mfaForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const { data: f, error: factorError } = await sb.auth.mfa.listFactors();
+  const factor = f?.totp?.find(x => x.status === 'verified');
+  if (factorError || !factor) { $('#mfaErr').textContent = 'Unable to load your authenticator. Try again.'; return; }
+  const { error } = await sb.auth.mfa.challengeAndVerify({ factorId: factor.id, code: $('#mfaCode').value.trim() });
+  if (error) $('#mfaErr').textContent = 'That code did not work. Try again.';
+  else boot();
+});
+
+$('#logout').onclick = async () => { await sb.auth.signOut(); location.reload(); };
+
+function resetIdle() { clearTimeout(idleTimer); idleTimer = setTimeout(async () => { await sb.auth.signOut(); location.reload(); }, 30 * 60 * 1000); }
+['click', 'keydown', 'mousemove', 'touchstart'].forEach(ev => document.addEventListener(ev, () => { if (me) resetIdle(); }));
+
+async function boot() {
+  if (recovering || me) return;
+  const bootEpoch = authEpoch;
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { showForm('loginForm'); return; }
+  const { data: aal, error: aalError } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (aalError || !aal) { $('#loginErr').textContent = 'Unable to verify sign-in security. Please try again.'; showForm('loginForm'); return; }
+  if (aal.nextLevel === 'aal2' && aal.currentLevel !== 'aal2') { $('#login').hidden = false; showForm('mfaForm'); return; }
+  const { data: verified, error: userError } = await sb.auth.getUser();
+  if (userError || !verified?.user || verified.user.id !== session.user.id) {
+    await sb.auth.signOut(); showForm('loginForm'); $('#loginErr').textContent = 'Unable to verify your session. Please sign in again.'; return;
+  }
+  const { data: prof, error: profileError } = await sb.from('profiles').select('role').eq('id', verified.user.id).maybeSingle();
+  if (profileError || prof?.role !== 'admin') {
+    await sb.auth.signOut();
+    showForm('loginForm');
+    $('#loginErr').textContent = profileError ? 'Unable to verify admin access.' : 'This account is not an admin.';
+    return;
+  }
+  if (bootEpoch !== authEpoch || recovering || me) return;
+  me = verified.user;
+  resetIdle();
+  $('#login').hidden = true;
+  $('#app').hidden = false;
+  buildNav();
+  go('dashboard');
+  liveChannel = sb.channel('live').on('postgres_changes', { event: '*', schema: 'public' }, onChange).subscribe();
 }
+
+function buildNav() {
+  $('#nav').innerHTML = PAGES.map(p => `<button data-p="${p}">${LABEL[p]}${p === 'orders' && pendingOrders ? `<span class="dot">${pendingOrders}</span>` : ''}</button>`).join('');
+  $('#nav').querySelectorAll('button').forEach(b => { b.onclick = () => go(b.dataset.p); b.classList.toggle('on', b.dataset.p === page); });
+}
+
+async function countPending() {
+  const { count } = await sb.from('orders').select('id', { count: 'exact', head: true }).eq('status', 'pending');
+  pendingOrders = count || 0;
+  buildNav();
+}
+
+function onChange(p) {
+  if (p.table === 'orders') countPending();
+  if (p.table === 'messages' && page === 'messages') return refreshChat();
+  const map = { products: 'products', projects: 'projects', orders: 'orders', feedback: 'feedback' };
+  if (map[p.table] === page || (page === 'dashboard')) go(page, true);
+}
+
+async function go(p, silent) {
+  page = p;
+  chatWith = p === 'messages' ? chatWith : null;
+  buildNav();
+  if (!silent) countPending();
+  $('#title').textContent = LABEL[p];
+  $('#actions').innerHTML = '';
+  if (!me) return;
+  const host = $('#view');
+  const v = document.createElement('div');
+  host.replaceChildren(v);
+  if (p === 'deliveryFees') {
+    if (!window.GraphensDeliveryFeeAdmin?.mount) { v.textContent = 'Delivery fee screen could not be loaded.'; return; }
+    try { window.GraphensDeliveryFeeAdmin.mount({ container: v, client: sb }); }
+    catch (e) { v.textContent = 'Delivery fee screen could not be opened: ' + (e.message || String(e)); }
+    return;
+  }
+  if (p === 'dashboard') return dashboard(v);
+  if (CRUD[p]) return crud(v, p);
+  if (p === 'orders') return orders(v);
+  if (p === 'messages') return messages(v);
+  if (p === 'customers') return customers(v);
+  if (p === 'feedback') return feedback(v);
+  if (p === 'activity') return activity(v);
+  if (p === 'settings') return settings(v);
+}
+
+/* ---------- dashboard ---------- */
+async function dashboard(v) {
+  const [o, pr, pj, fb] = await Promise.all([
+    sb.from('orders').select('status,total'), sb.from('products').select('id'), sb.from('projects').select('id'), sb.from('feedback').select('rating')]);
+  const orders = o.data || [];
+  const rev = orders.filter(x => x.status === 'delivered').reduce((s, x) => s + Number(x.total), 0);
+  const avg = fb.data?.length ? (fb.data.reduce((s, x) => s + x.rating, 0) / fb.data.length).toFixed(1) : '-';
+  const m = [['Pending orders', orders.filter(x => x.status === 'pending').length], ['All orders', orders.length],
+    ['Delivered revenue', ugx(rev)], ['Products', pr.data?.length || 0], ['Projects', pj.data?.length || 0], ['Average rating', avg]];
+  v.innerHTML = `<div class="grid">${m.map(x => `<div class="card metric"><small>${x[0]}</small><b>${x[1]}</b></div>`).join('')}</div>`;
+}
+
+/* ---------- products + projects ---------- */
