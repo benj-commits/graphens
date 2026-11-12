@@ -21,7 +21,6 @@ const deliverySlots = [
   'Tomorrow • 1:30 PM',
   'Saturday • 11:00 AM',
 ];
-const providerOptions = ['Faras', 'Uber', 'SafeBoda'];
 String ugx(num n) => 'UGX ${NumberFormat('#,###').format(n)}';
 
 String? firstImg(Map m) {
