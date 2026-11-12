@@ -137,7 +137,7 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
           if (picked != null && mounted) setState(() => preferredDate = picked);
         }, child: Text(preferredDate == null ? 'Choose preferred delivery date (optional)' : 'Preferred date: ${checkoutDate(preferredDate!)}')),
         if (preferredDate != null) TextButton(onPressed: busy ? null : () => setState(() => preferredDate = null), child: const Text('Clear date')),
-        const Text('The date is a preference, not a confirmed delivery booking. If Faras is available, the Graphen team can arrange delivery separately after confirming the fee with you. No Faras booking or quote is made here.'),
+        const Text('The date is a preference. An admin will review your delivery address and offer a delivery fee. Please accept or decline the fee in My Orders before fulfilment.'),
         const SizedBox(height: 10),
         const Text('Cash on delivery requested. No payment is collected here; mobile money is not available in this checkout.'),
         CheckboxListTile(contentPadding: EdgeInsets.zero, value: consent, onChanged: busy ? null : (v) => setState(() => consent = v ?? false), title: const Text('I agree to share my phone, address and order details with Graphen to fulfil this order.')),
