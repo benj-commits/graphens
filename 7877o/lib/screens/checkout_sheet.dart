@@ -1,9 +1,12 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 
 import '../api.dart';
+import 'delivery_pin_picker.dart';
 
 /// Request identifiers are persisted before submission so an interrupted
 /// request can be retried without creating a second order.
@@ -15,6 +18,11 @@ String newCheckoutRequestId() {
   final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
 }
+
+Map<String, double?> checkoutPinParams(LatLng? pin) => {
+  'p_latitude': pin?.latitude,
+  'p_longitude': pin?.longitude,
+};
 
 String checkoutDate(DateTime date) =>
     '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
@@ -32,9 +40,11 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
   final address = TextEditingController();
   final note = TextEditingController();
   DateTime? preferredDate;
+  LatLng? deliveryPin;
   bool consent = false;
   bool busy = false;
   bool failed = false;
+  bool pinRpcUnavailable = false;
 
   @override
   void initState() {
@@ -63,7 +73,7 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sign in and add items to your cart first.')));
       return;
     }
-    setState(() { busy = true; failed = false; });
+    setState(() { busy = true; failed = false; pinRpcUnavailable = false; });
     try {
       final prefs = await SharedPreferences.getInstance();
       final key = 'checkout_request_v1_${user.id}';
@@ -76,14 +86,27 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
       }
       final ids = cart.lines.keys.toList()..sort();
       final items = ids.map((id) => <String, dynamic>{'id': id, 'qty': cart.lines[id]!['qty']}).toList();
-      final result = await db.rpc('place_checkout_order_v1', params: {
+      final params = <String, dynamic>{
         'p_request_id': requestId,
         'p_phone': phone.text.trim(),
         'p_address': address.text.trim(),
         'p_note': note.text.trim(),
         'p_preferred_date': preferredDate == null ? null : checkoutDate(preferredDate!),
         'p_items': items,
-      });
+        ...checkoutPinParams(deliveryPin),
+      };
+      dynamic result;
+      try {
+        result = await db.rpc('place_checkout_order_v1', params: params);
+      } on PostgrestException catch (error) {
+        // PGRST202 means no matching RPC was executed. For an unpinned order,
+        // safely support the existing six-argument server without dropping a pin.
+        if (error.code != 'PGRST202' || deliveryPin != null) rethrow;
+        final legacyParams = Map<String, dynamic>.from(params)
+          ..remove('p_latitude')
+          ..remove('p_longitude');
+        result = await db.rpc('place_checkout_order_v1', params: legacyParams);
+      }
       final order = Map<String, dynamic>.from(result as Map);
       if (order['id'] == null || order['status'] == null || order['total'] is! num) {
         throw StateError('Incomplete order response');
@@ -92,6 +115,12 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
       if (!await prefs.remove(key)) throw StateError('Could not clear checkout request');
       cart.clear();
       if (mounted) Navigator.of(context).pop(order);
+    } on PostgrestException catch (error) {
+      if (mounted) setState(() {
+        busy = false;
+        failed = true;
+        pinRpcUnavailable = error.code == 'PGRST202' && deliveryPin != null;
+      });
     } catch (_) {
       if (mounted) setState(() { busy = false; failed = true; });
     }
@@ -128,6 +157,21 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
         const SizedBox(height: 12),
         TextFormField(controller: phone, enabled: !busy, maxLength: 80, keyboardType: TextInputType.phone, validator: requiredText, decoration: const InputDecoration(labelText: 'Phone for delivery')),
         TextFormField(controller: address, enabled: !busy, maxLength: 500, validator: requiredText, decoration: const InputDecoration(labelText: 'Delivery address / area')),
+        const Text('Written address required. A map pin is optional and its coordinates will be shared with Graphens for delivery.'),
+        OutlinedButton.icon(
+          onPressed: busy ? null : () async {
+            final selected = await Navigator.of(context).push<LatLng>(MaterialPageRoute(
+              builder: (_) => DeliveryPinPicker(initialPin: deliveryPin),
+            ));
+            if (selected != null && mounted) setState(() => deliveryPin = selected);
+          },
+          icon: const Icon(Icons.map_outlined),
+          label: Text(deliveryPin == null ? 'Choose delivery pin (optional)' : 'Change delivery pin'),
+        ),
+        if (deliveryPin != null) ...[
+          Text('Delivery pin: ${pinCoordinates(deliveryPin!)}'),
+          TextButton(onPressed: busy ? null : () => setState(() => deliveryPin = null), child: const Text('Clear delivery pin')),
+        ],
         TextFormField(controller: note, enabled: !busy, maxLength: 1000, decoration: const InputDecoration(labelText: 'Order note (optional)')),
         const SizedBox(height: 8),
         OutlinedButton(onPressed: busy ? null : () async {
@@ -140,10 +184,10 @@ class _CheckoutSheetState extends State<CheckoutSheet> {
         const Text('The date is a preference. An admin will review your delivery address and offer a delivery fee. Please accept or decline the fee in My Orders before fulfilment.'),
         const SizedBox(height: 10),
         const Text('Cash on delivery requested. No payment is collected here; mobile money is not available in this checkout.'),
-        CheckboxListTile(contentPadding: EdgeInsets.zero, value: consent, onChanged: busy ? null : (v) => setState(() => consent = v ?? false), title: const Text('I agree to share my phone, address and order details with Graphen to fulfil this order.')),
-        const Text('No device location is collected or shared.'),
+        CheckboxListTile(contentPadding: EdgeInsets.zero, value: consent, onChanged: busy ? null : (v) => setState(() => consent = v ?? false), title: const Text('I agree to share my phone, address, optional pin coordinates and order details with Graphens to fulfil this order.')),
         if (failed) ...[
           const SizedBox(height: 12),
+          if (pinRpcUnavailable) const Text('This checkout server does not support delivery pins yet. You can clear the pin and retry, or contact Graphens.', style: TextStyle(color: Colors.red)),
           const Text('We could not confirm the result. Check My Orders before placing another order. Retry with the same details to avoid duplicates. Checkout requires the latest database migration.', style: TextStyle(color: Colors.red)),
           TextButton(onPressed: busy ? null : resetAttempt, child: const Text('Start a different order')),
         ],
