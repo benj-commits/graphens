@@ -3,7 +3,8 @@ description: Graphen Bags - customer app and admin portal (Flutter mobile + web)
 publish_to: none
 version: 1.0.0+1
 environment:
-  sdk: ">=3.3.0 <4.0.0"
+  sdk: ">=3.6.0 <4.0.0"
+  flutter: ">=3.27.0"
 dependencies:
   flutter:
     sdk: flutter
@@ -13,6 +14,8 @@ dependencies:
   local_auth: ^2.3.0
   permission_handler: ^11.3.1
   geolocator: ^13.0.0
+  flutter_map: ^8.2.2
+  latlong2: ^0.9.1
   url_launcher: ^6.3.0
 dev_dependencies:
   flutter_test:
