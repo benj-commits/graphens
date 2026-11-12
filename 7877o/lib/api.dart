@@ -125,7 +125,7 @@ class ProductReviewStorage {
 
   static Future<void> submitReview(String productId, int rating, String comment) async {
     final all = await loadAll();
-    final list = [...(all[productId] ?? const []), {
+    final list = <Map<String, dynamic>>[...(all[productId] ?? const []), {
       'rating': rating,
       'comment': comment.trim(),
       'name': myName(),
