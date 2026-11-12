@@ -1,0 +1,238 @@
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:local_auth/local_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+final SupabaseClient db = Supabase.instance.client;
+
+class Cart extends ChangeNotifier {
+  final Map<String, Map<String, dynamic>> _lines = {};
+
+  Map<String, Map<String, dynamic>> get lines => _lines;
+
+  int get count => _lines.values.fold<int>(0, (total, line) => total + ((line['qty'] as int?) ?? 0));
+
+  int get total {
+    var sum = 0;
+    for (final line in _lines.values) {
+      final product = line['p'] as Map<String, dynamic>;
+      final qty = (line['qty'] as int?) ?? 0;
+      final price = product['price'];
+      final parsed = price is num ? price : num.tryParse(price.toString()) ?? 0;
+      sum += (parsed * qty).round();
+    }
+    return sum;
+  }
+
+  void add(Map<String, dynamic> product) {
+    final id = (product['id'] ?? '').toString();
+    if (id.isEmpty) return;
+
+    final line = _lines.putIfAbsent(id, () => {'p': product, 'qty': 0});
+    line['qty'] = (line['qty'] as int) + 1;
+    notifyListeners();
+  }
+
+  void setQty(String productId, int qty) {
+    if (qty <= 0) {
+      _lines.remove(productId);
+      notifyListeners();
+      return;
+    }
+
+    final line = _lines[productId];
+    if (line == null) return;
+    line['qty'] = qty;
+    notifyListeners();
+  }
+
+  void clear() {
+    _lines.clear();
+    notifyListeners();
+  }
+}
+
+final cart = Cart();
+
+String myFirstName() {
+  final fullName = db.auth.currentUser?.userMetadata?['full_name']?.toString() ?? '';
+  final cleaned = fullName.trim();
+  if (cleaned.isEmpty) return 'Customer';
+  return cleaned.split(RegExp(r'\s+')).first;
+}
+
+String myName() {
+  return db.auth.currentUser?.userMetadata?['full_name']?.toString() ?? 'Customer';
+}
+
+List<String> get deliverySlots => const [
+  'Today 5–7 pm',
+  'Tomorrow 9–11 am',
+  'Tomorrow 2–5 pm',
+  'This weekend',
+];
+
+String ugx(dynamic value) {
+  final parsed = value is num ? value : num.tryParse(value.toString()) ?? 0;
+  return NumberFormat.currency(locale: 'en_UG', symbol: 'UGX ', decimalDigits: 0).format(parsed);
+}
+
+String firstImg(Map<String, dynamic> item) {
+  final images = item['images'] is List ? item['images'] as List : const <dynamic>[];
+  for (final raw in images) {
+    final value = raw?.toString().trim();
+    if (value != null && value.isNotEmpty) return value;
+  }
+  return '';
+}
+
+Widget netImg(String? url, {BoxFit fit = BoxFit.cover}) {
+  final safeUrl = (url ?? '').trim();
+  if (safeUrl.isEmpty) {
+    return const SizedBox.expand(
+      child: DecoratedBox(
+        decoration: BoxDecoration(color: Color(0xFFF2E5D2)),
+        child: Icon(Icons.image_outlined, color: Color(0xFFB8893A)),
+      ),
+    );
+  }
+
+  return Image.network(
+    safeUrl,
+    fit: fit,
+    width: double.infinity,
+    height: double.infinity,
+    errorBuilder: (_, __, ___) => const SizedBox.expand(
+      child: DecoratedBox(
+        decoration: BoxDecoration(color: Color(0xFFF2E5D2)),
+        child: Icon(Icons.broken_image_outlined, color: Color(0xFFB8893A)),
+      ),
+    ),
+  );
+}
+
+Future<bool> requestLocationIfNeeded({
+  required BuildContext context,
+  bool showNotice = false,
+}) async {
+  if (showNotice && context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Location access can be enabled from your device settings if needed.')),
+    );
+  }
+  return true;
+}
+
+void snack(BuildContext context, String message) {
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(message),
+      behavior: SnackBarBehavior.floating,
+      margin: const EdgeInsets.all(12),
+    ),
+  );
+}
+
+Future<void> openWhatsApp({required String phone}) async {
+  final digits = phone.replaceAll(RegExp(r'\D'), '');
+  final uri = Uri.parse('https://wa.me/$digits');
+  if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+    throw Exception('Could not open WhatsApp');
+  }
+}
+
+Future<bool> tryBiometricAuth() async {
+  try {
+    final localAuth = LocalAuthentication();
+    final hasBiometrics = await localAuth.canCheckBiometrics;
+    final isSupported = await localAuth.isDeviceSupported();
+    if (!hasBiometrics && !isSupported) return true;
+    final authenticated = await localAuth.authenticate(
+      localizedReason: 'Confirm it is you to continue',
+      options: const AuthenticationOptions(stickyAuth: true),
+    );
+    return authenticated;
+  } catch (_) {
+    return true;
+  }
+}
+
+class WishlistStorage {
+  static const _key = 'graphen_wishlist';
+
+  static Future<Set<String>> load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final ids = prefs.getStringList(_key) ?? const <String>[];
+    return ids.toSet();
+  }
+
+  static Future<void> save(Set<String> ids) async {
+    final prefs = await SharedPreferences.getInstance();
+    final ordered = ids.toList()..sort();
+    await prefs.setStringList(_key, ordered);
+  }
+
+  static Future<void> toggle(String id) async {
+    final ids = await load();
+    if (ids.contains(id)) {
+      ids.remove(id);
+    } else {
+      ids.add(id);
+    }
+    await save(ids);
+  }
+}
+
+class ProductReviewStorage {
+  static Future<List<Map<String, dynamic>>> loadForProduct(String productId) async {
+    final response = await db.from('feedback').select().eq('project_id', productId).order('created_at', ascending: false);
+    final data = response.data ?? const <dynamic>[];
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  static Future<double> averageForProduct(String productId) async {
+    final response = await db.from('feedback').select('rating').eq('project_id', productId);
+    final data = response.data ?? const <dynamic>[];
+    if (data.isEmpty) return 0;
+
+    final total = data.fold<double>(0, (sum, item) {
+      final rating = (item as Map<String, dynamic>)['rating'];
+      return sum + ((rating is num) ? rating.toDouble() : 0.0);
+    });
+    return total / data.length;
+  }
+
+  static Future<void> submitReview(dynamic productId, int rating, String comment) async {
+    await db.from('feedback').insert({
+      'project_id': productId,
+      'user_id': db.auth.currentUser!.id,
+      'customer_name': myName(),
+      'rating': rating,
+      'comment': comment,
+    });
+  }
+}
+
+const List<String> categories = [
+  'Bags',
+  'Travel',
+  'Accessories',
+  'Wallets',
+  'Work',
+];
+
+String formatShortDate(DateTime date) {
+  return DateFormat('MMM d, yyyy').format(date);
+}
+
+String formatOrderStatus(String status) {
+  return status.replaceAll('_', ' ').split(' ').map((word) {
+    if (word.isEmpty) return word;
+    return word[0].toUpperCase() + word.substring(1);
+  }).join(' ');
+}
+
+String moneyLabel(num value) => ugx(value);
