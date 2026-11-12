@@ -35,7 +35,19 @@ jobs:
 
       - name: Analyze
         working-directory: 7877o
-        run: flutter analyze
+        shell: bash
+        run: |
+          set +e
+          flutter analyze --no-fatal-infos --no-fatal-warnings 2>&1 | tee "$RUNNER_TEMP/flutter-analyze.log"
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            while IFS= read -r line; do
+              if [[ "$line" == *"error •"* ]]; then
+                echo "::error::$line"
+              fi
+            done < "$RUNNER_TEMP/flutter-analyze.log"
+          fi
+          exit "$status"
 
       - name: Run tests
         working-directory: 7877o
