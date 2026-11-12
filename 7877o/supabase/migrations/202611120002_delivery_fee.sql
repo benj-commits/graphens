@@ -1,25 +1,19 @@
 -- Apply after 202611120001_checkout_requests.sql; review and test before deployment.
--- The existing six-argument checkout remains unchanged. Coordinates are reserved
--- for a future authenticated location flow; this migration does not collect them.
+-- Checkout may supply an optional, validated delivery pin from migration 001.
 begin;
 
 alter table public.orders
   add column delivery_fee numeric,
   add column delivery_fee_status text not null default 'awaiting_quote',
   add column delivery_fee_revision integer not null default 0,
-  add column delivery_latitude numeric,
-  add column delivery_longitude numeric,
+  add column if not exists delivery_latitude numeric,
+  add column if not exists delivery_longitude numeric,
   add constraint orders_delivery_fee_valid check (
     delivery_fee is null or (delivery_fee >= 0 and delivery_fee <= 10000000 and delivery_fee = trunc(delivery_fee))
   ),
   add constraint orders_delivery_fee_state_valid check (
     (delivery_fee_status = 'awaiting_quote' and delivery_fee is null and delivery_fee_revision = 0)
     or (delivery_fee_status in ('offered', 'accepted', 'declined') and delivery_fee is not null and delivery_fee_revision > 0)
-  ),
-  add constraint orders_delivery_location_valid check (
-    (delivery_latitude is null and delivery_longitude is null)
-    or (delivery_latitude is not null and delivery_longitude is not null
-        and delivery_latitude between -90 and 90 and delivery_longitude between -180 and 180)
   );
 
 -- Immutable to clients. Order IDs are retained even if an order is later deleted.
@@ -47,15 +41,15 @@ declare
 begin
   if tg_op = 'INSERT' then
     if new.delivery_fee is not null or new.delivery_fee_status <> 'awaiting_quote'
-       or new.delivery_fee_revision <> 0 or new.delivery_latitude is not null
-       or new.delivery_longitude is not null or new.status <> 'pending' then
+       or new.delivery_fee_revision <> 0 or new.status <> 'pending' then
       raise exception 'Orders must start pending and awaiting a delivery quote';
     end if;
+    -- The orders_delivery_location_valid CHECK also covers direct inserts.
     return new;
   end if;
 
-  -- Bind a quote to the order owner and delivery destination. Future location
-  -- capture or address editing requires a separately reviewed migration.
+  -- Bind a quote to the original order owner and delivery destination.
+  -- Location or address editing requires a separately reviewed migration.
   if new.user_id is distinct from old.user_id or new.address is distinct from old.address
      or new.delivery_latitude is distinct from old.delivery_latitude
      or new.delivery_longitude is distinct from old.delivery_longitude then
