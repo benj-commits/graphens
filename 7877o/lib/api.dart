@@ -1,129 +1,202 @@
--- Run this whole file in Supabase > SQL Editor.
+import 'dart:convert';
 
-create table profiles (
-  id uuid primary key references auth.users on delete cascade,
-  full_name text, phone text,
-  role text not null default 'customer',
-  created_at timestamptz default now()
-);
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:local_auth/local_auth.dart';
+import 'theme.dart';
 
-create function handle_new_user() returns trigger language plpgsql security definer set search_path = public as $$
-begin
-  insert into profiles(id, full_name, phone)
-  values (new.id, new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'phone');
-  return new;
-end $$;
-create trigger on_auth_user_created after insert on auth.users for each row execute function handle_new_user();
+SupabaseClient get db => Supabase.instance.client;
 
-create function is_admin() returns boolean language sql security definer stable set search_path = public as $$
-  select exists (select 1 from profiles where id = auth.uid() and role = 'admin')
-$$;
+const categories = ['Lady Bags', 'Handbags', 'Cases', 'Wallets & More', 'Other'];
+const orderStatuses = ['pending', 'confirmed', 'processing', 'delivered', 'cancelled'];
+const deliverySlots = [
+  'Today • 10:00 AM',
+  'Today • 2:00 PM',
+  'Tomorrow • 9:30 AM',
+  'Tomorrow • 1:30 PM',
+  'Saturday • 11:00 AM',
+];
+const providerOptions = ['Faras', 'Uber', 'SafeBoda'];
+String ugx(num n) => 'UGX ${NumberFormat('#,###').format(n)}';
 
-create table products (
-  id uuid primary key default gen_random_uuid(),
-  name text not null, category text, price numeric default 0, stock int default 0,
-  description text, images text[] default '{}', active boolean default true,
-  created_at timestamptz default now()
-);
-create table projects (
-  id uuid primary key default gen_random_uuid(),
-  title text not null, category text, price_from numeric default 0, status text,
-  description text, images text[] default '{}', active boolean default true,
-  created_at timestamptz default now()
-);
-create table orders (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid references auth.users not null,
-  customer_name text, phone text, address text, note text, payment_method text,
-  items jsonb not null, total numeric not null,
-  delivery_fee numeric not null default 0,
-  delivery_fee_confirmed boolean not null default false,
-  delivery_fee_status text not null default 'pending_customer_confirmation',
-  status text not null default 'pending',
-  created_at timestamptz default now()
-);
-create table messages (
-  id uuid primary key default gen_random_uuid(),
-  customer_id uuid references auth.users not null,
-  sender_id uuid references auth.users not null,
-  is_admin boolean default false,
-  body text not null,
-  created_at timestamptz default now()
-);
-create table feedback (
-  id uuid primary key default gen_random_uuid(),
-  project_id uuid references projects on delete cascade,
-  user_id uuid references auth.users not null,
-  customer_name text, rating int, comment text,
-  created_at timestamptz default now()
-);
+String? firstImg(Map m) {
+  final l = (m['images'] ?? []) as List;
+  return l.isEmpty ? null : l.first as String;
+}
 
-alter table profiles enable row level security;
-alter table products enable row level security;
-alter table projects enable row level security;
-alter table orders enable row level security;
-alter table messages enable row level security;
-alter table feedback enable row level security;
+Widget netImg(String? url, {BoxFit fit = BoxFit.cover}) {
+  final ph = Container(color: const Color(0xFFEEE6D8), child: const Center(child: Icon(Icons.shopping_bag_outlined, color: gold)));
+  if (url == null || url.isEmpty) return ph;
+  return Image.network(url, fit: fit, errorBuilder: (_, __, ___) => ph);
+}
 
-create policy "profile read" on profiles for select using (id = auth.uid() or is_admin());
-create policy "profile admin write" on profiles for update using (is_admin());
+String myName() => (db.auth.currentUser?.userMetadata?['full_name'] ?? 'Customer').toString();
+String myFirstName() {
+  final full = myName().trim();
+  if (full.isEmpty) return 'there';
+  return full.split(RegExp(r'\s+')).first;
+}
 
-create policy "products read" on products for select using (active or is_admin());
-create policy "products admin" on products for all using (is_admin()) with check (is_admin());
-create policy "projects read" on projects for select using (active or is_admin());
-create policy "projects admin" on projects for all using (is_admin()) with check (is_admin());
+void snack(BuildContext c, String m) => ScaffoldMessenger.of(c).showSnackBar(
+      SnackBar(
+        content: Text(m),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: m.toLowerCase().contains('success') || m.toLowerCase().contains('confirmed') ? Colors.green.shade700 : null,
+      ));
 
-create policy "orders insert" on orders for insert with check (user_id = auth.uid());
-create policy "orders read" on orders for select using (user_id = auth.uid() or is_admin());
-create policy "orders admin update" on orders for update using (is_admin());
+Future<void> openWhatsApp({required String phone}) async {
+  final normalized = phone.replaceAll(RegExp(r'\D'), '');
+  final phoneNumber = normalized.startsWith('0') ? '256${normalized.substring(1)}' : normalized;
+  final url = 'https://wa.me/$phoneNumber';
+  final uri = Uri.parse(url);
+  if (await canLaunchUrl(uri)) {
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+}
 
-create policy "messages read" on messages for select using (customer_id = auth.uid() or is_admin());
-create policy "messages insert" on messages for insert with check (
-  (customer_id = auth.uid() and sender_id = auth.uid() and is_admin = false) or is_admin()
-);
+Future<Position?> requestLocationIfNeeded({required BuildContext context, bool showNotice = true}) async {
+  final status = await Permission.location.request();
+  if (status.isGranted) {
+    try {
+      final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.medium);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('graphen_last_location', '${pos.latitude},${pos.longitude}');
+      return pos;
+    } catch (_) {
+      if (context.mounted) snack(context, 'Location access was granted but location could not be read.');
+    }
+  } else {
+    if (showNotice && context.mounted) {
+      snack(context, 'Location is needed for delivery and tracking, but can be turned back on in settings.');
+    }
+  }
+  return null;
+}
 
-create policy "feedback read" on feedback for select using (auth.uid() is not null);
-create policy "feedback insert" on feedback for insert with check (user_id = auth.uid());
-create policy "feedback admin delete" on feedback for delete using (is_admin());
+Future<LocalAuthentication> getBiometricAuth() async => LocalAuthentication();
 
-alter publication supabase_realtime add table products, projects, orders, messages, feedback;
+Future<bool> tryBiometricAuth() async {
+  final auth = LocalAuthentication();
+  try {
+    return await auth.canCheckBiometrics &&
+        await auth.authenticate(
+          localizedReason: 'Verify it is you to continue',
+          options: const AuthenticationOptions(stickyAuth: true, biometricOnly: false),
+        );
+  } catch (_) {
+    return false;
+  }
+}
 
--- Image storage
-insert into storage.buckets (id, name, public) values ('media', 'media', true);
-create policy "media public read" on storage.objects for select using (bucket_id = 'media');
-create policy "media admin write" on storage.objects for insert with check (bucket_id = 'media' and is_admin());
-create policy "media admin delete" on storage.objects for delete using (bucket_id = 'media' and is_admin());
+class ProductReviewStorage {
+  static const key = 'graphen_product_reviews';
 
--- After you register your own account in the app, make it the admin:
--- update profiles set role = 'admin' where id = (select id from auth.users where email = 'YOUR_EMAIL');
--- Graphen Bags: security hardening. Run ONCE, after schema.sql (full_setup.sql already includes both).
+  static Future<Map<String, List<Map<String, dynamic>>>> loadAll() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(key);
+    if (raw == null || raw.isEmpty) return {};
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) return {};
+      final map = <String, List<Map<String, dynamic>>>{};
+      decoded.forEach((productId, value) {
+        if (value is List) {
+          map[productId] = value
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
+        }
+      });
+      return map;
+    } catch (_) {
+      return {};
+    }
+  }
 
--- 1) Admin check: if an admin has turned on 2-factor, the database itself demands the 2FA-verified session.
-create or replace function is_admin() returns boolean language sql security definer stable set search_path = public as $$
-  select exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
-  and (
-    coalesce(auth.jwt()->>'aal', 'aal1') = 'aal2'
-    or not exists (select 1 from auth.mfa_factors f where f.user_id = auth.uid() and f.status = 'verified')
-  );
-$$;
+  static Future<List<Map<String, dynamic>>> loadForProduct(String productId) async {
+    final all = await loadAll();
+    return all[productId] ?? const [];
+  }
 
--- 2) Nobody can promote themselves to admin through the API.
-create or replace function protect_role() returns trigger language plpgsql security definer set search_path = public as $$
-begin
-  if new.role is distinct from old.role and auth.uid() is not null then
-    raise exception 'Role can only be changed from the Supabase SQL Editor';
-  end if;
-  return new;
-end $$;
-create trigger profiles_protect_role before update on profiles for each row execute function protect_role();
+  static Future<void> submitReview(String productId, int rating, String comment) async {
+    final all = await loadAll();
+    final list = [...(all[productId] ?? const []), {
+      'rating': rating,
+      'comment': comment.trim(),
+      'name': myName(),
+      'created_at': DateTime.now().toIso8601String(),
+    }];
+    all[productId] = list;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(key, jsonEncode(all));
+  }
 
--- 3) Data sanity rules
-alter table products add constraint products_price_chk check (price >= 0);
-alter table products add constraint products_stock_chk check (stock >= 0);
-alter table projects add constraint projects_price_chk check (price_from >= 0);
-alter table orders add constraint orders_status_chk check (status in ('pending','confirmed','processing','delivered','cancelled'));
-alter table orders add constraint orders_total_chk check (total >= 0);
-alter table orders add constraint orders_delivery_fee_chk check (delivery_fee >= 0);
-alter table feedback add constraint feedback_rating_chk check (rating between 1 and 5);
-alter table feedback add constraint feedback_len_chk check (char_length(coalesce(comment, '')) <= 1000);
-alter table messages add constraint messages_len_chk check (char_length(body) between 1 and 2000);
+  static Future<double> averageForProduct(String productId) async {
+    final reviews = await loadForProduct(productId);
+    if (reviews.isEmpty) return 0;
+    final total = reviews.fold<int>(0, (sum, item) => sum + ((item['rating'] as int?) ?? 0));
+    return total / reviews.length;
+  }
+}
+
+class WishlistStorage {
+  static const key = 'graphen_wishlist';
+
+  static Future<Set<String>> load() async {
+    final prefs = await SharedPreferences.getInstance();
+    return (prefs.getStringList(key) ?? []).toSet();
+  }
+
+  static Future<void> save(Set<String> ids) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(key, ids.toList());
+  }
+
+  static Future<void> toggle(String productId) async {
+    final ids = await load();
+    if (ids.contains(productId)) {
+      ids.remove(productId);
+    } else {
+      ids.add(productId);
+    }
+    await save(ids);
+  }
+}
+
+class Cart extends ChangeNotifier {
+  final lines = <String, Map<String, dynamic>>{};
+
+  void add(Map<String, dynamic> p) {
+    final id = p['id'] as String;
+    if (lines.containsKey(id)) {
+      lines[id]!['qty'] = (lines[id]!['qty'] as int) + 1;
+    } else {
+      lines[id] = {'p': p, 'qty': 1};
+    }
+    notifyListeners();
+  }
+
+  void setQty(String id, int q) {
+    if (q <= 0) {
+      lines.remove(id);
+    } else {
+      lines[id]!['qty'] = q;
+    }
+    notifyListeners();
+  }
+
+  num get total => lines.values.fold<num>(0, (s, l) => s + (l['p']['price'] as num) * (l['qty'] as int));
+  int get count => lines.values.fold<int>(0, (s, l) => s + (l['qty'] as int));
+
+  void clear() {
+    lines.clear();
+    notifyListeners();
+  }
+}
+
+final cart = Cart();
