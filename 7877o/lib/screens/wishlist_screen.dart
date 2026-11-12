@@ -39,7 +39,7 @@ class _WishlistScreenState extends State<WishlistScreen> {
     }
 
     return FutureBuilder<List<Map<String, dynamic>>>(
-      future: db.from('products').select().eq('active', true).then((r) => (r.data ?? []).cast<Map<String, dynamic>>().where((p) => wishlisted.contains(p['id'])).toList()),
+      future: db.from('products').select().eq('active', true).then((r) => r.cast<Map<String, dynamic>>().where((p) => wishlisted.contains(p['id'])).toList()),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
           return const Center(child: CircularProgressIndicator(color: gold));

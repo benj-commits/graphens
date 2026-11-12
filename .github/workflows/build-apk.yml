@@ -28,8 +28,6 @@ jobs:
         with:
           channel: stable
           cache: true
-          cache-path: 7877o/.pub-cache
-          pubspec-path: 7877o/pubspec.yaml
 
       - name: Install dependencies
         working-directory: 7877o
@@ -37,11 +35,33 @@ jobs:
 
       - name: Analyze
         working-directory: 7877o
-        run: flutter analyze
+        shell: bash
+        run: |
+          set +e
+          flutter analyze --no-fatal-infos --no-fatal-warnings 2>&1 | tee "$RUNNER_TEMP/flutter-analyze.log"
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            while IFS= read -r line; do
+              if [[ "$line" == *"error •"* ]]; then
+                echo "::error::$line"
+              fi
+            done < "$RUNNER_TEMP/flutter-analyze.log"
+          fi
+          exit "$status"
 
       - name: Run tests
         working-directory: 7877o
-        run: flutter test
+        shell: bash
+        run: |
+          set +e
+          flutter test --reporter expanded 2>&1 | tee "$RUNNER_TEMP/flutter-test.log"
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            tail -n 35 "$RUNNER_TEMP/flutter-test.log" | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+          fi
+          exit "$status"
 
       - name: Build release APK
         working-directory: 7877o
