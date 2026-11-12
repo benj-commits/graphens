@@ -93,7 +93,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           const Positioned.fill(
             child: DecoratedBox(
               decoration: BoxDecoration(
-                gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFFF2E5D2), Color(0xFFFBF6EE), Color(0xFFEDE2D2)]),
+                gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF342018), Color(0xFF5A3526), Color(0xFF21140F)]),
               ),
             ),
           ),
@@ -138,7 +138,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         height: 610,
         padding: const EdgeInsets.all(38),
         decoration: const BoxDecoration(
-          gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF171512), Color(0xFF393024)]),
+          gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [ink, leather]),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -183,7 +183,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   children: [
                     Text(signUp ? 'Create account' : 'Welcome back', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: ink)),
                     const SizedBox(height: 6),
-                    Text(signUp ? 'Join us and find your everyday favorite.' : 'Sign in to continue your Graphen experience.', style: const TextStyle(color: Color(0xFF77716A), height: 1.4)),
+                    Text(signUp ? 'Join us and find your everyday favorite.' : 'Use your account email and password to return to your bags and orders.', style: const TextStyle(color: Color(0xFF5E4B40), height: 1.4)),
                   ],
                 ),
               ),
