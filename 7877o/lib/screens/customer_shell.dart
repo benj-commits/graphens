@@ -17,6 +17,11 @@ class CustomerShell extends StatefulWidget {
 
 class _CustomerShellState extends State<CustomerShell> {
   int i = 0;
+  final visited = <int>{0};
+
+  void _selectPage(int index) {
+    setState(() { i = index; visited.add(index); });
+  }
 
   void _showSupport() {
     showModalBottomSheet<void>(
@@ -26,7 +31,7 @@ class _CustomerShellState extends State<CustomerShell> {
         initialTopic: i,
         onChat: () {
           Navigator.pop(sheetContext);
-          setState(() => i = 4);
+          _selectPage(4);
         },
         onWhatsApp: (uri) async {
           final messenger = ScaffoldMessenger.of(context);
@@ -47,7 +52,7 @@ class _CustomerShellState extends State<CustomerShell> {
     final customerId = db.auth.currentUser?.id ?? 'guest-user';
     final pages = [
       const ShopScreen(),
-      const WishlistScreen(),
+      WishlistScreen(active: i == 1),
       const CartScreen(),
       const OrdersScreen(),
       ChatView(customerId: customerId, asAdmin: false),
@@ -66,13 +71,17 @@ class _CustomerShellState extends State<CustomerShell> {
           IconButton(tooltip: 'Sign out', icon: const Icon(Icons.logout), onPressed: () => db.auth.signOut()),
         ],
       ),
-      body: IndexedStack(index: i, children: pages),
+      // Keep visited tabs alive, but defer their streams and queries until opened.
+      body: IndexedStack(index: i, children: [
+        for (var index = 0; index < pages.length; index++)
+          if (visited.contains(index)) pages[index] else const SizedBox.shrink(),
+      ]),
       bottomNavigationBar: ListenableBuilder(
         listenable: cart,
         builder: (_, __) => NavigationBar(
           selectedIndex: i,
           indicatorColor: gold.withValues(alpha: .3),
-          onDestinationSelected: (v) => setState(() => i = v),
+          onDestinationSelected: _selectPage,
           destinations: [
             const NavigationDestination(icon: Icon(Icons.storefront_outlined), label: 'Shop'),
             const NavigationDestination(icon: Icon(Icons.favorite_border), label: 'Wishlist'),
