@@ -51,25 +51,39 @@ $('#loginForm').addEventListener('submit', async e => {
 $('#forgot').onclick = async () => {
   const email = $('#email').value.trim();
   if (!email) { $('#loginErr').textContent = 'Enter your email first.'; return; }
-  await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
-  $('#loginErr').textContent = 'If that email belongs to an admin, a reset link is on its way.';
+  $('#forgot').disabled = true;
+  try {
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    if (error) throw error;
+    $('#loginErr').textContent = 'If that email belongs to an admin, a reset link is on its way.';
+  } catch (error) {
+    $('#loginErr').textContent = 'Could not request a reset link. Check your connection and try again.';
+  } finally { $('#forgot').disabled = false; }
 };
 
 $('#newPassForm').addEventListener('submit', async e => {
   e.preventDefault();
-  const { error } = await sb.auth.updateUser({ password: $('#np').value });
-  if (error) $('#npErr').textContent = error.message;
-  else { await sb.auth.signOut(); location.href = location.pathname; }
+  try {
+    const { error } = await sb.auth.updateUser({ password: $('#np').value });
+    if (error) { $('#npErr').textContent = error.message; return; }
+  } catch (error) { $('#npErr').textContent = 'Could not confirm the password was updated. Check your connection before trying again.'; return; }
+  try {
+    const { error } = await sb.auth.signOut();
+    if (error) throw error;
+    location.href = location.pathname;
+  } catch (error) { $('#npErr').textContent = 'Password updated, but sign-out failed. Please sign out and sign in again.'; }
 });
 
 $('#mfaForm').addEventListener('submit', async e => {
   e.preventDefault();
-  const { data: f, error: factorError } = await sb.auth.mfa.listFactors();
-  const factor = f?.totp?.find(x => x.status === 'verified');
-  if (factorError || !factor) { $('#mfaErr').textContent = 'Unable to load your authenticator. Try again.'; return; }
-  const { error } = await sb.auth.mfa.challengeAndVerify({ factorId: factor.id, code: $('#mfaCode').value.trim() });
-  if (error) $('#mfaErr').textContent = 'That code did not work. Try again.';
-  else boot();
+  try {
+    const { data: f, error: factorError } = await sb.auth.mfa.listFactors();
+    const factor = f?.totp?.find(x => x.status === 'verified');
+    if (factorError || !factor) { $('#mfaErr').textContent = 'Unable to load your authenticator. Check your connection and try again.'; return; }
+    const { error } = await sb.auth.mfa.challengeAndVerify({ factorId: factor.id, code: $('#mfaCode').value.trim() });
+    if (error) $('#mfaErr').textContent = 'Could not verify the code. Check the code and your connection, then try again.';
+    else await boot();
+  } catch (error) { $('#mfaErr').textContent = 'Could not verify the code. Check your connection and try again.'; }
 });
 
 $('#logout').onclick = async () => { await sb.auth.signOut(); location.reload(); };
