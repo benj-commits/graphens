@@ -1,11 +1,24 @@
-# Deploy the admin site from the 7877o directory to GitHub Pages
+# Deploy only the explicitly listed admin website files to GitHub Pages.
 name: Deploy admin site to Pages
 
 on:
   push:
     branches: ["main"]
     paths:
-      - "7877o/**"
+      - "7877o/index.html"
+      - "7877o/style.css"
+      - "7877o/config.js"
+      - "7877o/dashboard.js"
+      - "7877o/app.js"
+      - "7877o/app_part2.js"
+      - "7877o/app_part3.js"
+      - "7877o/app_part4.js"
+      - "7877o/realtime_sync.js"
+      - "7877o/delivery_fee_admin.js"
+      - "7877o/start.js"
+      - "7877o/vendor/supabase-2.45.4.js"
+      - "7877o/vendor/591.supabase.js"
+      - "7877o/vendor/SUPABASE-LICENSE"
       - ".github/workflows/deploy-admin.yml"
   workflow_dispatch:
 
@@ -31,10 +44,44 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
+      # These files are public. config.js must contain only public client values;
+      # never put service-role keys, passwords, or other secrets in site assets.
+      - name: Stage allowlisted admin assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          site_dir="${RUNNER_TEMP}/graphens-admin-pages"
+          rm -rf "$site_dir"
+          mkdir -p "$site_dir/vendor"
+          test ! -L 7877o && test ! -L 7877o/vendor
+          files=(
+            index.html
+            style.css
+            config.js
+            dashboard.js
+            app.js
+            app_part2.js
+            app_part3.js
+            app_part4.js
+            realtime_sync.js
+            delivery_fee_admin.js
+            start.js
+            vendor/supabase-2.45.4.js
+            vendor/591.supabase.js
+            vendor/SUPABASE-LICENSE
+          )
+          for file in "${files[@]}"; do
+            if [[ ! -f "7877o/$file" || -L "7877o/$file" ]]; then
+              echo "Missing or symlinked required asset: $file" >&2
+              exit 1
+            fi
+            install -m 0644 "7877o/$file" "$site_dir/$file"
+          done
+
       - name: Upload admin site
         uses: actions/upload-pages-artifact@v3
         with:
-          path: "7877o"
+          path: "${{ runner.temp }}/graphens-admin-pages"
 
       - name: Deploy to GitHub Pages
         id: deployment
