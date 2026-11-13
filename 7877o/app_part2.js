@@ -27,7 +27,12 @@ function editor(t, row) {
   const fieldHtml = c.fields.map(([k, l, type, opts]) => {
     const val = row?.[k];
     if (type === 'bool') return `<label><span><input type="checkbox" name="${k}" style="width:auto" ${(val ?? true) ? 'checked' : ''}> ${l}</span></label>`;
-    if (type === 'select') return `<label>${l}<select name="${k}">${opts.map(o => `<option ${o === val ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></label>`;
+    if (type === 'select') {
+      // Existing values may predate the current list; never silently replace them.
+      const missing = row && !opts.includes(val);
+      const current = missing ? `<option value="${esc(val ?? '')}" selected>${val == null || val === '' ? 'Not set' : esc(val)}</option>` : '';
+      return `<label>${l}<select name="${k}">${current}${opts.map(o => `<option value="${esc(o)}" ${o === val ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></label>`;
+    }
     if (type === 'textarea') return `<label>${l}<textarea name="${k}">${esc(val)}</textarea></label>`;
     return `<label>${l}<input name="${k}" type="${type}" value="${esc(val)}"></label>`;
   }).join('');
@@ -49,7 +54,8 @@ function editor(t, row) {
       const data = t === 'vouchers' ? {} : { images: keep };
       c.fields.forEach(([k, , type]) => {
         const el = f.elements[k];
-        data[k] = type === 'bool' ? el.checked : type === 'number' ? Number(el.value) || 0 : el.value.trim();
+        if (type === 'select' && row && el.value === String(row[k] ?? '')) return;
+        data[k] = type === 'bool' ? el.checked : type === 'number' ? Number(el.value) || 0 : type === 'select' ? el.value : el.value.trim();
       });
       for (const file of (t === 'vouchers' ? [] : $('#files').files)) {
         const path = `${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
