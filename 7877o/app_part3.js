@@ -29,26 +29,44 @@ async function orders(v) {
       <div class="small">Phone: ${esc(o.phone)} · ${esc(o.address)} · ${esc(o.payment_method)}${o.note ? ' · Note: ' + esc(o.note) : ''}</div>
       <div class="small">${new Date(o.created_at).toLocaleString()}</div>
       ${orderDeliveryDetails(o)}
-      <select aria-label="Order status for ${esc(String(o.id).slice(0, 6))}" data-o="${esc(o.id)}" style="margin-top:8px;max-width:200px">${STATUSES.includes(o.status) ? '' : `<option value="" selected disabled>Unknown status</option>`}${STATUSES.map(s => `<option ${s === o.status ? 'selected' : ''}>${s}</option>`).join('')}</select>
+      <select aria-label="Order status for ${esc(String(o.id).slice(0, 6))}" data-o="${esc(o.id)}" style="margin-top:8px;max-width:200px" ${['delivered', 'cancelled'].includes(o.status) || !STATUSES.includes(o.status) ? 'disabled' : ''}>${STATUSES.includes(o.status) ? '' : `<option value="" selected disabled>Unknown status</option>`}${STATUSES.map(s => `<option ${s === o.status ? 'selected' : ''}>${s}</option>`).join('')}</select>
     </div>`).join('')}</div>`;
   v.querySelectorAll('[data-o]').forEach(s => s.onchange = async () => {
     const previous = data.find(o => String(o.id) === s.dataset.o)?.status;
+    if (!STATUSES.includes(previous) || ['delivered', 'cancelled'].includes(previous) || !STATUSES.includes(s.value)) {
+      s.value = previous; return;
+    }
     s.disabled = true;
-    const { data: updated, error } = await sb.from('orders').update({ status: s.value }).eq('id', s.dataset.o).select('id,status').maybeSingle();
+    try {
+      // Compare the old status atomically to avoid reopening a concurrently closed order.
+      const { data: updated, error } = await sb.from('orders').update({ status: s.value }).eq('id', s.dataset.o).eq('status', previous).select('id,status').maybeSingle();
+      if (error || !updated) throw error || new Error('Order changed or could not be updated. Refresh and try again.');
+    } catch (error) {
+      s.value = previous; alert('Could not update order: ' + (error?.message || 'Please try again.'));
+      s.disabled = false; return;
+    }
     s.disabled = false;
-    if (error || !updated) { s.value = previous; alert('Could not update order: ' + (error?.message || 'No order was updated.')); }
-    else { await countPending(); if (page === 'orders') go('orders', true); }
+    if (page === 'orders') go('orders', true);
+    countPending().catch(() => {});
   });
 }
 
 /* ---------- messages ---------- */
-let names = {};
+let names = {}, sending = false, chatRefreshId = 0;
 async function messages(v) {
-  const { data: profs } = await sb.from('profiles').select('id,full_name');
+  let profs;
+  try {
+    const result = await sb.from('profiles').select('id,full_name');
+    if (result.error) throw result.error;
+    profs = result.data;
+  } catch (error) {
+    if (page === 'messages' && v.isConnected) v.textContent = 'Could not load conversations. Check your connection and try again.';
+    return;
+  }
   if (page !== 'messages' || !v.isConnected) return;
   names = Object.fromEntries((profs || []).map(p => [p.id, p.full_name || 'Customer']));
   v.innerHTML = `<div class="msgs"><div class="threads" id="threads"></div>
-    <div class="card chat"><div class="bubbles" id="bubbles"><p class="muted">Select a conversation.</p></div>
+    <div class="card chat"><div class="bubbles" id="bubbles"><p class="muted">Select a conversation.</p></div><p class="err" id="chatErr" role="status"></p>
     <div class="composer" id="composer" hidden><input id="msgIn" placeholder="Type a reply"><button class="btn" id="send">Send</button></div></div></div>`;
   $('#send').onclick = send;
   $('#msgIn').addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
@@ -56,9 +74,20 @@ async function messages(v) {
 }
 
 async function refreshChat() {
-  if (!$('#threads')) return;
-  const { data } = await sb.from('messages').select('*').order('created_at', { ascending: true });
-  if (page !== 'messages' || !$('#threads')) return;
+  const threads = $('#threads');
+  if (!threads) return;
+  const refreshId = ++chatRefreshId;
+  let data;
+  try {
+    const result = await sb.from('messages').select('*').order('created_at', { ascending: true });
+    if (result.error) throw result.error;
+    data = result.data;
+  } catch (error) {
+    if (page === 'messages' && $('#threads') === threads && refreshId === chatRefreshId) $('#chatErr').textContent = 'Could not refresh messages. Check your connection and try again.';
+    return false;
+  }
+  if (page !== 'messages' || $('#threads') !== threads || refreshId !== chatRefreshId) return;
+  $('#chatErr').textContent = '';
   const by = {};
   (data || []).forEach(m => (by[m.customer_id] ||= []).push(m));
   const ids = Object.keys(by).sort((a, b) => by[b].at(-1).created_at.localeCompare(by[a].at(-1).created_at));
@@ -73,13 +102,19 @@ async function refreshChat() {
 }
 
 async function send() {
-  const t = $('#msgIn').value.trim();
-  if (!t || !chatWith) return;
-  const input = $('#msgIn');
+  const input = $('#msgIn'), button = $('#send');
+  const t = input.value.trim();
+  if (!t || !chatWith || sending) return;
   const recipient = chatWith;
-  const { error } = await sb.from('messages').insert({ customer_id: recipient, sender_id: me.id, is_admin: true, body: t });
-  if (error) { alert('Message was not sent: ' + error.message); return; }
-  if (input.isConnected && input.value.trim() === t && chatWith === recipient) input.value = '';
+  sending = true; button.disabled = true;
+  try {
+    const { error } = await sb.from('messages').insert({ customer_id: recipient, sender_id: me.id, is_admin: true, body: t });
+    if (error) throw error;
+    if (input.isConnected && input.value.trim() === t && chatWith === recipient) input.value = '';
+    if (page === 'messages' && await refreshChat() === false && $('#chatErr')) $('#chatErr').textContent = 'Message sent, but messages could not be refreshed. Check your connection.';
+  } catch (error) {
+    alert('Could not confirm the message was sent. Check the conversation before retrying.');
+  } finally { sending = false; button.disabled = false; }
 }
 
 /* ---------- feedback ---------- */
