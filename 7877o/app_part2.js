@@ -12,16 +12,18 @@ async function crud(v, t) {
         ${r.stock !== undefined ? `<span class="small"> · stock ${esc(r.stock)}</span>` : ''}
         <span class="tag ${r.active ? '' : 'off'}">${r.active ? 'Visible' : 'Hidden'}</span></div>
       <button class="btn ghost" data-e="${esc(r.id)}">Edit</button>
-      <button class="btn ghost" data-d="${esc(r.id)}">Delete</button>
+      ${t === 'products' ? '<span class="small">To hide, edit and uncheck Visible in app.</span>' : `<button class="btn ghost" data-d="${esc(r.id)}">Delete</button>`}
     </div>`).join('')}</div>`;
   v.querySelectorAll('[data-e]').forEach(b => b.onclick = () => editor(t, data.find(r => r.id === b.dataset.e)));
-  v.querySelectorAll('[data-d]').forEach(b => b.onclick = async () => {
+  if (t !== 'products') v.querySelectorAll('[data-d]').forEach(b => b.onclick = async () => {
     if (confirm(`Delete this ${c.one}?`)) { const { data: deleted, error } = await sb.from(t).delete().eq('id', b.dataset.d).select('id').maybeSingle(); if (error || !deleted) alert('Could not delete: ' + (error?.message || 'No record was deleted.')); else go(t, true); }
   });
 }
 
 function editor(t, row) {
   const c = CRUD[t];
+  // Capture stock as read, even if the list refreshes during editing.
+  const originalStock = row?.stock;
   let keep = [...(row?.images || [])];
   const f = $('#dlgForm');
   const fieldHtml = c.fields.map(([k, l, type, opts]) => {
@@ -55,6 +57,16 @@ function editor(t, row) {
       c.fields.forEach(([k, , type]) => {
         const el = f.elements[k];
         if (type === 'select' && row && el.value === String(row[k] ?? '')) return;
+        if (t === 'products' && k === 'stock') {
+          if (row && originalStock === undefined) throw new Error('Original stock is unavailable. Close and reopen the product before saving.');
+          const value = el.value.trim();
+          if (row && originalStock === null && value === '') return;
+          const stock = Number(value);
+          if (!value || !Number.isSafeInteger(stock) || stock < 0 || stock > 2147483647) throw new Error('Stock must be a whole number from 0 to 2147483647.');
+          if (row && stock === originalStock) return;
+          data.stock = stock;
+          return;
+        }
         data[k] = type === 'bool' ? el.checked : type === 'number' ? Number(el.value) || 0 : type === 'select' ? el.value : el.value.trim();
       });
       for (const file of (t === 'vouchers' ? [] : $('#files').files)) {
@@ -63,7 +75,16 @@ function editor(t, row) {
         if (error) throw error;
         data.images.push(sb.storage.from('media').getPublicUrl(path).data.publicUrl);
       }
-      const result = row ? await sb.from(t).update(data).eq('id', row.id).select('id').maybeSingle() : await sb.from(t).insert(data).select('id').maybeSingle();
+      let result;
+      if (row) {
+        let query = sb.from(t).update(data).eq('id', row.id);
+        const stockChanged = t === 'products' && Object.prototype.hasOwnProperty.call(data, 'stock');
+        if (stockChanged) query = originalStock === null ? query.is('stock', null) : query.eq('stock', originalStock);
+        result = await query.select('id').maybeSingle();
+        if (stockChanged && !result.error && !result.data) throw new Error('Stock may have changed, or this product is unavailable. Close and reopen it to review the latest stock before saving.');
+      } else {
+        result = await sb.from(t).insert(data).select('id').maybeSingle();
+      }
       if (result.error || !result.data) throw result.error || new Error('No record was saved.');
       $('#dlg').close();
       go(t, true);
