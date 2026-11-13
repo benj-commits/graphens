@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../api.dart';
 import '../theme.dart';
+import 'checkout_sheet.dart';
 
 class CartScreen extends StatelessWidget {
   const CartScreen({super.key});
@@ -33,7 +34,7 @@ class CartScreen extends StatelessWidget {
               padding: const EdgeInsets.all(16),
               child: Column(children: [
                 Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                  const Text('Total', style: TextStyle(fontSize: 16)),
+                  const Text('Estimated item subtotal', style: TextStyle(fontSize: 16)),
                   Text(ugx(cart.total), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: gold)),
                 ]),
                 const SizedBox(height: 12),
@@ -44,125 +45,19 @@ class CartScreen extends StatelessWidget {
         },
       );
 
-  void _checkout(BuildContext context) {
-    final phone = TextEditingController(text: db.auth.currentUser?.userMetadata?['phone']?.toString() ?? '');
-    final address = TextEditingController();
-    final note = TextEditingController();
-    final voucher = TextEditingController();
-    String pay = 'MTN Request to Pay';
-    String deliverySlot = deliverySlots.first;
-    bool useLocation = false;
-    bool locationNoticeShown = false;
-    bool orderPlaced = false;
-
-    showModalBottomSheet(
+  Future<void> _checkout(BuildContext context) async {
+    final order = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, set) => Padding(
-          padding: EdgeInsets.fromLTRB(16, 16, 16, MediaQuery.of(ctx).viewInsets.bottom + 16),
-          child: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              const Text('Checkout', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 12),
-              TextField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Phone for delivery')),
-              const SizedBox(height: 10),
-              TextField(controller: address, decoration: const InputDecoration(labelText: 'Delivery address / area')),
-              const SizedBox(height: 10),
-              TextField(controller: note, decoration: const InputDecoration(labelText: 'Order note (optional)')),
-              const SizedBox(height: 10),
-              TextField(controller: voucher, decoration: const InputDecoration(labelText: 'Voucher code (optional)')),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<String>(
-                value: pay,
-                items: const ['MTN Request to Pay', 'Airtel Request to Pay', 'Cash on delivery'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-                onChanged: (v) => set(() => pay = v ?? pay),
-              ),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<String>(
-                value: deliverySlot,
-                items: deliverySlots.map((slot) => DropdownMenuItem(value: slot, child: Text(slot))).toList(),
-                onChanged: (v) => set(() => deliverySlot = v ?? deliverySlot),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Checkbox(value: useLocation, onChanged: (v) async {
-                    set(() => useLocation = v ?? false);
-                    if (v == true && !locationNoticeShown) {
-                      locationNoticeShown = true;
-                      if (ctx.mounted) {
-                        await requestLocationIfNeeded(context: ctx, showNotice: true);
-                      }
-                    }
-                  }),
-                  const Expanded(child: Text('Share my delivery location')),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(12)),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Suggested transport', style: TextStyle(fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 6),
-                    Text('Best option: ${(cart.total.toDouble() < 200000 ? 'Faras' : 'Uber')} • ${ugx((cart.total.toDouble() * 0.08).round())}'),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 14),
-              ElevatedButton(
-                onPressed: () async {
-                  if (phone.text.trim().isEmpty || address.text.trim().isEmpty) {
-                    snack(ctx, 'Phone and address are required');
-                    return;
-                  }
-                  try {
-                    final discount = voucher.text.trim().toUpperCase() == 'GRAPHEN10' ? 0.1 : 0.0;
-                    final discounted = cart.total * (1 - discount);
-                    final orderId = (DateTime.now().millisecondsSinceEpoch % 100000).toString().padLeft(5, '0');
-
-                    await db.from('orders').insert({
-                      'user_id': db.auth.currentUser!.id,
-                      'customer_name': myName(),
-                      'phone': phone.text.trim(),
-                      'address': address.text.trim(),
-                      'note': note.text.trim(),
-                      'payment_method': pay,
-                      'total': discounted,
-                      'status': 'confirmed',
-                      'items': cart.lines.values
-                          .map((l) => {'id': l['p']['id'], 'name': l['p']['name'], 'price': l['p']['price'], 'qty': l['qty']})
-                          .toList(),
-                    });
-                    cart.clear();
-                    orderPlaced = true;
-                    if (ctx.mounted) Navigator.pop(ctx);
-                    if (context.mounted) {
-                      showDialog(
-                        context: context,
-                        builder: (_) => AlertDialog(
-                          title: const Text('Order confirmed', style: TextStyle(color: Colors.green)),
-                          content: Text('Your order #${orderId} is confirmed.\nDelivery slot: $deliverySlot\nPayment: $pay'),
-                          actions: [
-                            TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
-                          ],
-                        ),
-                      );
-                    }
-                  } catch (e) {
-                    if (ctx.mounted) snack(ctx, e.toString());
-                  }
-                },
-                child: const Text('Place order'),
-              ),
-            ]),
-          ),
-        ),
-      ),
+      isDismissible: false,
+      enableDrag: false,
+      builder: (_) => const CheckoutSheet(),
     );
+    if (!context.mounted || order == null) return;
+    await showDialog<void>(context: context, builder: (dialogContext) => AlertDialog(
+      title: const Text('Order submitted'),
+      content: Text('Order ID: ${order['id']}\nStatus: ${order['status']}\nItem total: ${ugx(order['total'] as num)}\n\nNo payment was collected. Delivery availability and cost are not yet confirmed.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('OK'))],
+    ));
   }
 }

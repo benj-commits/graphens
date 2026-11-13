@@ -12,7 +12,12 @@ class ShopScreen extends StatefulWidget {
 class _ShopScreenState extends State<ShopScreen> {
   String cat = 'All';
   String q = '';
-  final stream = db.from('products').stream(primaryKey: ['id']).eq('active', true).order('created_at', ascending: false);
+  late var stream = _loadProducts();
+  int generation = 0;
+
+  Stream<List<Map<String, dynamic>>> _loadProducts() => db.from('products').stream(primaryKey: ['id']).eq('active', true).order('created_at', ascending: false);
+
+  void _retry() => setState(() { generation++; stream = _loadProducts(); });
 
   @override
   Widget build(BuildContext context) => Column(children: [
@@ -47,8 +52,13 @@ class _ShopScreenState extends State<ShopScreen> {
         ),
         Expanded(
           child: StreamBuilder<List<Map<String, dynamic>>>(
+            key: ValueKey(generation),
             stream: stream,
             builder: (c, s) {
+              if (s.hasError) return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Text('Could not load products. Please try again.'),
+                TextButton(onPressed: _retry, child: const Text('Retry')),
+              ]));
               if (!s.hasData) return const Center(child: CircularProgressIndicator(color: gold));
               final list = s.data!.where((p) => (cat == 'All' || p['category'] == cat) && (q.isEmpty || (p['name'] ?? '').toString().toLowerCase().contains(q))).toList();
               if (list.isEmpty) return const Center(child: Text('Nothing here yet'));
@@ -101,27 +111,64 @@ class _ProductDetailState extends State<ProductDetail> {
   int rating = 5;
   bool loading = false;
   Set<String> wishlist = {};
+  bool wishlistBusy = true;
+  late Future<List<Map<String, dynamic>>> reviews;
 
   @override
   void initState() {
     super.initState();
+    reviews = ProductReviewStorage.loadForProduct(widget.p['id'].toString());
     _loadWishlist();
   }
 
   Future<void> _loadWishlist() async {
-    final ids = await WishlistStorage.load();
-    if (!mounted) return;
-    setState(() => wishlist = ids);
+    try {
+      final ids = await WishlistStorage.load();
+      if (mounted) setState(() => wishlist = ids);
+    } catch (_) {
+      if (mounted) snack(context, 'Could not load wishlist. Please try again.');
+    } finally {
+      if (mounted) setState(() => wishlistBusy = false);
+    }
+  }
+
+  Future<void> _toggleWishlist(String productId) async {
+    if (wishlistBusy) return;
+    setState(() => wishlistBusy = true);
+    try {
+      await WishlistStorage.toggle(productId);
+      final ids = await WishlistStorage.load();
+      if (!mounted) return;
+      setState(() => wishlist = ids);
+      snack(context, ids.contains(productId) ? 'Saved to wishlist' : 'Removed from wishlist');
+    } catch (_) {
+      if (mounted) snack(context, 'Could not update wishlist. Please try again.');
+    } finally {
+      if (mounted) setState(() => wishlistBusy = false);
+    }
   }
 
   Future<void> _saveReview() async {
-    if (comment.text.trim().isEmpty) return;
+    final text = comment.text.trim();
+    if (text.isEmpty || loading) return;
     setState(() => loading = true);
-    await ProductReviewStorage.submitReview(widget.p['id'], rating, comment.text.trim());
-    comment.clear();
-    if (!mounted) return;
-    setState(() => loading = false);
-    snack(context, 'Review submitted');
+    try {
+      await ProductReviewStorage.submitReview(widget.p['id'].toString(), rating, text);
+      if (!mounted) return;
+      comment.clear();
+      setState(() => reviews = ProductReviewStorage.loadForProduct(widget.p['id'].toString()));
+      snack(context, 'Review submitted');
+    } catch (_) {
+      if (mounted) snack(context, 'Could not save review. Please try again.');
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    comment.dispose();
+    super.dispose();
   }
 
   @override
@@ -136,12 +183,10 @@ class _ProductDetailState extends State<ProductDetail> {
         title: Text(p['name'] ?? ''),
         actions: [
           IconButton(
-            icon: Icon(wishlist.contains(productId) ? Icons.favorite : Icons.favorite_border),
-            onPressed: () async {
-              await WishlistStorage.toggle(productId);
-              await _loadWishlist();
-              snack(context, wishlist.contains(productId) ? 'Saved to wishlist' : 'Removed from wishlist');
-            },
+            icon: wishlistBusy
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : Icon(wishlist.contains(productId) ? Icons.favorite : Icons.favorite_border),
+            onPressed: wishlistBusy ? null : () => _toggleWishlist(productId),
           ),
         ],
       ),
@@ -158,10 +203,13 @@ class _ProductDetailState extends State<ProductDetail> {
             const SizedBox(height: 12),
             Text(p['description'] ?? ''),
             const SizedBox(height: 16),
-            FutureBuilder<double>(
-              future: ProductReviewStorage.averageForProduct(productId),
+            FutureBuilder<List<Map<String, dynamic>>>(
+              future: reviews,
               builder: (context, snapshot) {
-                final avg = snapshot.data ?? 0;
+                if (snapshot.hasError) return const Text('Could not load ratings.');
+                if (!snapshot.hasData) return const Text('Loading ratings…');
+                final items = snapshot.data!;
+                final avg = items.isEmpty ? 0.0 : items.fold<int>(0, (sum, item) => sum + ((item['rating'] as int?) ?? 0)) / items.length;
                 final label = avg > 0 ? '${avg.toStringAsFixed(1)} / 5' : 'No ratings yet';
                 return Text('Average rating: $label', style: const TextStyle(fontWeight: FontWeight.w600));
               },
@@ -180,16 +228,18 @@ class _ProductDetailState extends State<ProductDetail> {
             const Text('Reviews', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
             const SizedBox(height: 12),
             Row(children: [
-              DropdownButton<int>(value: rating, items: [5, 4, 3, 2, 1].map((i) => DropdownMenuItem(value: i, child: Text('$i ★'))).toList(), onChanged: (v) => setState(() => rating = v ?? 5)),
+              DropdownButton<int>(value: rating, items: [5, 4, 3, 2, 1].map((i) => DropdownMenuItem(value: i, child: Text('$i ★'))).toList(), onChanged: loading ? null : (v) => setState(() => rating = v ?? 5)),
               const SizedBox(width: 8),
-              Expanded(child: TextField(controller: comment, decoration: const InputDecoration(hintText: 'Write a review'))),
-              IconButton(onPressed: loading ? null : _saveReview, icon: const Icon(Icons.send, color: gold)),
+              Expanded(child: TextField(controller: comment, enabled: !loading, decoration: const InputDecoration(hintText: 'Write a review'))),
+              IconButton(onPressed: loading ? null : _saveReview, icon: loading ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.send, color: gold)),
             ]),
             const SizedBox(height: 12),
             FutureBuilder<List<Map<String, dynamic>>>(
-              future: ProductReviewStorage.loadForProduct(productId),
+              future: reviews,
               builder: (context, snapshot) {
-                final reviews = snapshot.data ?? const [];
+                if (snapshot.hasError) return const Text('Could not load reviews.');
+                if (!snapshot.hasData) return const Text('Loading reviews…');
+                final reviews = snapshot.data!;
                 if (reviews.isEmpty) return const Text('No reviews yet. Be the first to review this item.');
                 return Column(
                   children: reviews.map((review) {
