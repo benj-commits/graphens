@@ -8,7 +8,7 @@ function setup(rows, result = {data: {id: 'abc123', status: 'confirmed'}, error:
   const sb = {from(table) {
     calls.push(['from', table]);
     return { select(columns) { calls.push(['select', columns]); return {order: async () => ({data:rows, error:null})}; },
-      update(changes) { calls.push(['update', changes]); return {eq(field, id) {calls.push(['eq', field, id]); return {select(columns) { calls.push(['update-select',columns]); return {maybeSingle: async () => result}; }};}}; }
+      update(changes) { calls.push(['update', changes]); const chain = {eq(field, id) {calls.push(['eq', field, id]); return chain;}, select(columns) { calls.push(['update-select',columns]); return {maybeSingle: async () => result}; }}; return chain; }
     };
   }};
   const context = {sb, STATUSES: ['pending','confirmed','processing','delivered','cancelled'],
@@ -30,7 +30,8 @@ test('legacy schema: wildcard query and working status update with no delivery f
   await x.select.onchange();
   assert.equal(JSON.stringify(x.calls.find(c => c[0] === 'update')[1]), JSON.stringify({status:'confirmed'}));
   assert.deepEqual(x.calls.find(c => c[0] === 'eq'), ['eq','id',base.id]);
-  assert.deepEqual(x.refreshed, ['count','orders:true']);
+  assert.deepEqual(x.calls.filter(c => c[0] === 'eq'), [['eq','id',base.id],['eq','status','pending']]);
+  assert.deepEqual(x.refreshed, ['orders:true','count']);
 });
 
 test('migration data shows preference and accepted fee and total, not unaccepted totals', async () => {
