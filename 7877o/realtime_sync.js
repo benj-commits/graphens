@@ -22,9 +22,10 @@
       const channel = createChannel(...args);
       const subscribe = channel.subscribe.bind(channel);
       channel.subscribe = (callback) => subscribe((state, err) => {
-        if (state === 'SUBSCRIBED') showStatus('Live sync connected — app and admin data are up to date.', true);
+        if (!me) return;
+        if (state === 'SUBSCRIBED') showStatus('Live sync connected. Changes may take a moment to appear.', true);
         if (state === 'CHANNEL_ERROR' || state === 'TIMED_OUT') {
-          showStatus('Live sync is reconnecting. Changes are saved to the shared database.', false);
+          showStatus('Live sync is reconnecting. Refresh to check the latest data.', false);
           if (err) console.error('Realtime subscription:', err);
         }
         if (state === 'CLOSED') showStatus('Live sync disconnected. Reload the page to reconnect.', false);
@@ -39,7 +40,7 @@
   // Profiles are included so newly registered app customers appear promptly.
   window.onChange = (change) => {
     const table = change?.table;
-    if (!table) return;
+    if (!table || !me) return;
     if (table === 'orders' && typeof countPending === 'function') countPending();
 
     if (table === 'messages' && page === 'messages' && typeof refreshChat === 'function') {
@@ -51,13 +52,14 @@
       products: ['products', 'dashboard', 'activity'],
       projects: ['projects', 'dashboard', 'activity'],
       orders: ['orders', 'dashboard', 'activity'],
-      feedback: ['feedback', 'dashboard', 'activity'],
+      feedback: ['feedback', 'activity'],
       profiles: ['customers'],
       messages: ['messages'],
     }[table] || [];
 
     if (!affected.includes(page) || typeof go !== 'function') return;
+    const target = page;
     clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => go(page, true), 120);
+    refreshTimer = setTimeout(() => { if (me && page === target) go(target, true); }, 500);
   };
 })();
