@@ -1,4 +1,4 @@
-:root{--gold:#B8893A;--ink:#111;--cream:#FBF6EE;--line:#eadfcb}
+:root{--gold:#80601e;--ink:#2b1c16;--cream:#fbf6ee;--line:#e4d6c5}
 *{box-sizing:border-box}
 body{margin:0;font-family:system-ui,Segoe UI,Roboto,sans-serif;background:var(--cream);color:var(--ink)}
 [hidden]{display:none!important}
@@ -65,3 +65,33 @@ label{font-size:13px;color:#555;display:grid;gap:4px}
 
 .link2{background:none;border:0;color:#777;cursor:pointer;font:inherit;font-size:13px;text-decoration:underline}
 code{background:#f1ece0;padding:2px 6px;border-radius:6px;word-break:break-all}
+
+/* Dashboard: readable text is the chart's accessible data alternative. */
+:focus-visible{outline:3px solid #b87931;outline-offset:3px}
+#nav button.on{color:#f6d698;background:#4a3023}
+.btn.gold{color:#fff}
+.brand span{color:#f0cf93}
+#nav button:hover{background:#4a3023;color:#fff}
+main{padding:28px clamp(16px,3vw,40px)}
+.dashboard{max-width:1400px;margin:auto;display:grid;gap:18px}
+.dashboard-loading{padding:24px;color:#58483c}
+.dash-hero{display:flex;align-items:center;justify-content:space-between;gap:20px;background:linear-gradient(120deg,#302019,#5c3b28);color:#fff7ee;padding:clamp(24px,4vw,40px);border-radius:20px;overflow:hidden}
+.dash-hero h3{font-size:clamp(24px,3vw,34px);line-height:1.15;letter-spacing:-.03em;margin:8px 0}
+.dash-hero p:not(.eyebrow){color:#f0dfcf;margin:0;line-height:1.5}
+.eyebrow{font-size:11px;font-weight:800;letter-spacing:.13em;color:#79552d;margin:0}
+.dash-hero .eyebrow{color:#f1d3a1}
+.hero-mark{width:104px;height:104px;border:1px solid #b9986c;border-radius:50%;display:flex;flex:none;align-items:center;justify-content:center;flex-direction:column;color:#f4d8ad;transform:rotate(-8deg)}
+.hero-mark span{font-family:Georgia,serif;font-size:46px;line-height:1}.hero-mark small{font-size:9px;letter-spacing:.25em}
+.dash-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.dash-metric{padding:20px;border-radius:16px;border:1px solid var(--line);background:#fff;min-width:0;box-shadow:0 4px 16px #4425110a}
+.dash-metric p{font-size:13px;font-weight:700;margin:0 0 10px}.dash-metric strong{display:block;font-size:clamp(24px,2.7vw,32px);line-height:1.1;overflow-wrap:anywhere}.dash-metric span{display:block;font-size:12px;margin-top:10px;color:#665649}
+.dash-dark{background:#3a261d;color:#fff8ef;border-color:#3a261d}.dash-dark span{color:#ecdacb}.dash-warm{background:#f4e5cf;border-color:#e8d2b4}
+.dash-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.dash-panel{background:#fff;border:1px solid var(--line);border-radius:18px;padding:22px;min-width:0;box-shadow:0 4px 16px #4425110a}
+.panel-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.panel-heading h3{font-size:19px;margin:6px 0 0}.panel-pill{font-size:12px;font-weight:700;color:#604020;background:#f8eee0;border-radius:50px;padding:6px 10px;white-space:nowrap}
+.panel-note,.dash-footnote{font-size:13px;line-height:1.5;color:#665649}.panel-note{margin:12px 0 20px}.dash-footnote{margin:0}
+.chart-list{list-style:none;margin:0;padding:0;display:grid;gap:13px}.chart-list li{display:grid;grid-template-columns:minmax(82px,120px) minmax(20px,1fr) auto;align-items:center;gap:10px;font-size:13px}.chart-label{overflow-wrap:anywhere}.chart-list strong{text-align:right;min-width:2ch}.chart-track{height:10px;background:#f1e8dd;border-radius:20px;overflow:hidden}.chart-fill{display:block;height:100%;background:#9a6332;border-radius:20px}
+.chart-message{padding:20px 12px;margin:0;border:1px dashed #d4c4b2;border-radius:12px;color:#58483c;font-size:14px;line-height:1.5}.dash-alert{background:#fff3e0;color:#5d3311;padding:14px;border-radius:12px;line-height:1.5}.dash-alert .btn{margin-left:8px}
+@media(max-width:1000px){.dash-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.dash-charts{grid-template-columns:1fr}}
+@media(max-width:760px){main{padding:20px 16px}aside{min-width:0}#nav{min-width:0}.hero-mark{width:72px;height:72px}.hero-mark span{font-size:32px}.dash-metric{padding:16px}.dash-panel{padding:18px}}
+@media(max-width:360px){.hero-mark{display:none}.panel-heading{align-items:flex-start;flex-wrap:wrap}.chart-list li{grid-template-columns:minmax(72px,94px) minmax(20px,1fr) auto}}
