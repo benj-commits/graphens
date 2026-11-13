@@ -61,7 +61,7 @@ class _CustomerShellState extends State<CustomerShell> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(titles[i]),
+        title: i == 0 ? const Text('Graphens', style: TextStyle(fontFamily: 'cursive', fontSize: 27, fontWeight: FontWeight.w700)) : Text(titles[i]),
         actions: [
           IconButton(
             icon: const Icon(Icons.support_agent_outlined),
